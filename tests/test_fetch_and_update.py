@@ -7,14 +7,17 @@ import unittest
 import uuid
 from contextlib import closing
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 from scripts.fetch_and_update import (
     append_yearly_csvs,
     parse_nav_text,
+    sync_up_databases_to_r2,
     update_databases,
     write_latest_csv,
 )
+from scripts.r2_storage import R2Config
 
 
 TEST_TMP_ROOT = Path(__file__).resolve().parents[1] / ".test-tmp"
@@ -71,6 +74,12 @@ class FetchAndUpdateTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(invalid, 3)
 
+    def test_nav_is_decimal_quantized_to_four_places(self) -> None:
+        rows, invalid = parse_nav_text(sample_line(nav="12.34567"))
+
+        self.assertEqual(invalid, 0)
+        self.assertEqual(rows[0].nav, Decimal("12.3457"))
+
     def test_duplicate_run_same_day_is_ignored(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:
             data_dir = Path(tmp) / "data"
@@ -81,8 +90,10 @@ class FetchAndUpdateTests(unittest.TestCase):
 
             with closing(sqlite3.connect(data_dir / "nav.db")) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM nav_history").fetchone()[0]
+                nav = conn.execute("SELECT nav FROM nav_history").fetchone()[0]
 
             self.assertEqual(count, 1)
+            self.assertEqual(nav, "12.3456")
 
     def test_new_scheme_appears_and_name_is_updated(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:
@@ -184,7 +195,7 @@ class FetchAndUpdateTests(unittest.TestCase):
                     "SELECT value FROM schema_metadata WHERE key = 'schema_version'"
                 ).fetchone()[0]
 
-            self.assertEqual(schema_version, "2")
+            self.assertEqual(schema_version, "3")
             self.assertGreaterEqual(
                 index_names,
                 {
@@ -230,8 +241,81 @@ class FetchAndUpdateTests(unittest.TestCase):
             ])
             self.assertEqual(len(csv_rows), 3)
             self.assertEqual(csv_rows[1][0], "100001")
+            self.assertEqual(csv_rows[1][4], "10.0000")
             self.assertEqual(csv_rows[2][0], "100002")
             self.assertEqual(csv_rows[0][-1], "nav_date")
+
+    def test_existing_real_nav_column_is_migrated_to_text(self) -> None:
+        with WorkspaceTemporaryDirectory() as tmp:
+            data_dir = Path(tmp) / "data"
+            db_path = data_dir / "nav.db"
+            db_path.parent.mkdir(parents=True)
+            with closing(sqlite3.connect(db_path)) as conn:
+                conn.executescript(
+                    """
+                    CREATE TABLE schema_metadata (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL,
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE TABLE schemes (
+                        scheme_code INTEGER PRIMARY KEY,
+                        isin_payout_or_growth TEXT,
+                        isin_reinvestment TEXT,
+                        scheme_name TEXT NOT NULL,
+                        first_seen_date TEXT NOT NULL,
+                        last_seen_date TEXT NOT NULL,
+                        is_active INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE TABLE nav_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        scheme_code INTEGER NOT NULL,
+                        nav_date TEXT NOT NULL,
+                        nav REAL NOT NULL,
+                        ingested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE (scheme_code, nav_date)
+                    );
+                    INSERT INTO schemes (scheme_code, scheme_name, first_seen_date, last_seen_date)
+                    VALUES (100001, 'Migrated Fund', '2026-04-01', '2026-04-01');
+                    INSERT INTO nav_history (scheme_code, nav_date, nav)
+                    VALUES (100001, '2026-04-01', 12.3);
+                    """
+                )
+                conn.commit()
+
+            update_databases([], date(2026, 4, 2), data_dir)
+
+            with closing(sqlite3.connect(db_path)) as conn:
+                nav_type = next(
+                    column[2]
+                    for column in conn.execute("PRAGMA table_info(nav_history)").fetchall()
+                    if column[1] == "nav"
+                )
+                nav = conn.execute("SELECT nav FROM nav_history").fetchone()[0]
+
+            self.assertEqual(nav_type.upper(), "TEXT")
+            self.assertEqual(nav, "12.3000")
+
+    def test_r2_upload_validates_database_before_upload(self) -> None:
+        with WorkspaceTemporaryDirectory() as tmp:
+            data_dir = Path(tmp) / "data"
+            db_path = data_dir / "nav.db"
+            db_path.parent.mkdir(parents=True)
+            with closing(sqlite3.connect(db_path)) as conn:
+                conn.execute("CREATE TABLE placeholder (id INTEGER)")
+                conn.commit()
+            config = R2Config(
+                account_id="account123",
+                bucket="nav-archive",
+                access_key_id="access",
+                secret_access_key="secret",
+                endpoint="https://account123.r2.cloudflarestorage.com",
+            )
+
+            with self.assertRaises(RuntimeError):
+                sync_up_databases_to_r2({db_path}, data_dir, config)
 
 
 if __name__ == "__main__":

@@ -12,13 +12,15 @@ import urllib.request
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 
 try:
-    from scripts.r2_storage import R2Config, download_object, load_dotenv, upload_object
+    from scripts.r2_storage import R2Config, atomic_upload_object, download_object, load_dotenv, r2_lock
+    from scripts.validator import validate_database
 except ModuleNotFoundError:
-    from r2_storage import R2Config, download_object, load_dotenv, upload_object
+    from r2_storage import R2Config, atomic_upload_object, download_object, load_dotenv, r2_lock
+    from validator import validate_database
 
 
 AMFI_URL = "https://portal.amfiindia.com/spages/NAVAll.txt"
@@ -29,6 +31,7 @@ LOG_DIR = ROOT_DIR / "logs"
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 COMBINED_DB = DATA_DIR / "nav.db"
 LATEST_CSV = ROOT_DIR / "latest_nav.csv"
+NAV_QUANT = Decimal("0.0001")
 
 SCHEME_LINE_RE = re.compile(r"^\s*\d+\s*;")
 
@@ -39,7 +42,7 @@ class NavRow:
     isin_payout_or_growth: str | None
     isin_reinvestment: str | None
     scheme_name: str
-    nav: float
+    nav: Decimal
     nav_date: date
 
 
@@ -85,6 +88,17 @@ def clean_optional(value: str) -> str | None:
     return cleaned or None
 
 
+def normalize_nav(value: str) -> Decimal:
+    nav = Decimal(value).quantize(NAV_QUANT, rounding=ROUND_HALF_UP)
+    if nav.is_nan() or nav.is_infinite():
+        raise InvalidOperation("NAV is not finite")
+    return nav
+
+
+def format_nav(nav: Decimal) -> str:
+    return f"{nav:.4f}"
+
+
 def parse_nav_text(text: str) -> tuple[list[NavRow], int]:
     rows: list[NavRow] = []
     invalid_count = 0
@@ -102,7 +116,7 @@ def parse_nav_text(text: str) -> tuple[list[NavRow], int]:
 
         try:
             scheme_code = int(parts[0])
-            nav_decimal = Decimal(parts[4])
+            nav_decimal = normalize_nav(parts[4])
             nav_date = parse_amfi_date(parts[5])
             if nav_date < MIN_NAV_DATE:
                 logging.info(
@@ -112,8 +126,6 @@ def parse_nav_text(text: str) -> tuple[list[NavRow], int]:
                     MIN_NAV_DATE.isoformat(),
                 )
                 continue
-            if nav_decimal.is_nan() or nav_decimal.is_infinite():
-                raise InvalidOperation("NAV is not finite")
             scheme_name = parts[3].strip()
             if not scheme_name:
                 raise ValueError("missing scheme name")
@@ -128,7 +140,7 @@ def parse_nav_text(text: str) -> tuple[list[NavRow], int]:
                 isin_payout_or_growth=clean_optional(parts[1]),
                 isin_reinvestment=clean_optional(parts[2]),
                 scheme_name=scheme_name,
-                nav=float(nav_decimal),
+                nav=nav_decimal,
                 nav_date=nav_date,
             )
         )
@@ -161,7 +173,47 @@ def init_db(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(db_path)) as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        migrate_nav_to_text(conn)
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         conn.commit()
+
+
+def migrate_nav_to_text(conn: sqlite3.Connection) -> None:
+    nav_columns = conn.execute("PRAGMA table_info(nav_history)").fetchall()
+    nav_type = next((column[2].upper() for column in nav_columns if column[1] == "nav"), "")
+    if nav_type == "TEXT":
+        return
+
+    logging.info("Migrating nav_history.nav from %s to TEXT", nav_type or "unknown")
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("ALTER TABLE nav_history RENAME TO nav_history_old")
+    conn.execute(
+        """
+        CREATE TABLE nav_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scheme_code INTEGER NOT NULL,
+            nav_date TEXT NOT NULL,
+            nav TEXT NOT NULL,
+            ingested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (scheme_code) REFERENCES schemes (scheme_code),
+            UNIQUE (scheme_code, nav_date)
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO nav_history (id, scheme_code, nav_date, nav, ingested_at)
+        SELECT
+            id,
+            scheme_code,
+            nav_date,
+            printf('%.4f', CAST(nav AS REAL)),
+            ingested_at
+        FROM nav_history_old
+        """
+    )
+    conn.execute("DROP TABLE nav_history_old")
+    conn.execute("PRAGMA foreign_keys = ON")
 
 
 def upsert_rows(db_path: Path, rows: list[NavRow], seen_on: date) -> tuple[int, int]:
@@ -172,27 +224,27 @@ def upsert_rows(db_path: Path, rows: list[NavRow], seen_on: date) -> tuple[int, 
 
     with closing(sqlite3.connect(db_path)) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
-        for row in rows:
-            conn.execute(
-                """
-                INSERT INTO schemes (
-                    scheme_code,
-                    isin_payout_or_growth,
-                    isin_reinvestment,
-                    scheme_name,
-                    first_seen_date,
-                    last_seen_date,
-                    is_active
-                )
-                VALUES (?, ?, ?, ?, ?, ?, 1)
-                ON CONFLICT(scheme_code) DO UPDATE SET
-                    isin_payout_or_growth = excluded.isin_payout_or_growth,
-                    isin_reinvestment = excluded.isin_reinvestment,
-                    scheme_name = excluded.scheme_name,
-                    last_seen_date = excluded.last_seen_date,
-                    is_active = 1,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
+        conn.executemany(
+            """
+            INSERT INTO schemes (
+                scheme_code,
+                isin_payout_or_growth,
+                isin_reinvestment,
+                scheme_name,
+                first_seen_date,
+                last_seen_date,
+                is_active
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 1)
+            ON CONFLICT(scheme_code) DO UPDATE SET
+                isin_payout_or_growth = excluded.isin_payout_or_growth,
+                isin_reinvestment = excluded.isin_reinvestment,
+                scheme_name = excluded.scheme_name,
+                last_seen_date = excluded.last_seen_date,
+                is_active = 1,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            [
                 (
                     row.scheme_code,
                     row.isin_payout_or_growth,
@@ -200,16 +252,19 @@ def upsert_rows(db_path: Path, rows: list[NavRow], seen_on: date) -> tuple[int, 
                     row.scheme_name,
                     seen_on_text,
                     seen_on_text,
-                ),
-            )
-            cursor = conn.execute(
-                """
-                INSERT OR IGNORE INTO nav_history (scheme_code, nav_date, nav)
-                VALUES (?, ?, ?)
-                """,
-                (row.scheme_code, row.nav_date.isoformat(), row.nav),
-            )
-            inserted += cursor.rowcount
+                )
+                for row in rows
+            ],
+        )
+        before_nav_insert = conn.total_changes
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO nav_history (scheme_code, nav_date, nav)
+            VALUES (?, ?, ?)
+            """,
+            [(row.scheme_code, row.nav_date.isoformat(), format_nav(row.nav)) for row in rows],
+        )
+        inserted = conn.total_changes - before_nav_insert
 
         conn.execute(
             """
@@ -247,7 +302,7 @@ def write_latest_csv(path: Path, rows: list[NavRow]) -> None:
                     row.isin_payout_or_growth or "",
                     row.isin_reinvestment or "",
                     row.scheme_name,
-                    f"{row.nav:.6f}".rstrip("0").rstrip("."),
+                    format_nav(row.nav),
                     row.nav_date.isoformat(),
                 ]
             )
@@ -299,7 +354,7 @@ def append_yearly_csv_rows(csv_path: Path, rows: list[NavRow]) -> int:
                     row.isin_payout_or_growth or "",
                     row.isin_reinvestment or "",
                     row.scheme_name,
-                    f"{row.nav:.6f}".rstrip("0").rstrip("."),
+                    format_nav(row.nav),
                     row.nav_date.isoformat(),
                 ]
             )
@@ -324,7 +379,9 @@ def sync_down_databases_from_r2(db_paths: set[Path], data_dir: Path, config: R2C
 def sync_up_databases_to_r2(db_paths: set[Path], data_dir: Path, config: R2Config) -> None:
     for db_path in sorted(db_paths):
         if db_path.exists():
-            upload_object(config, r2_key_for_db(db_path, data_dir), db_path)
+            if validate_database(db_path) != 0:
+                raise RuntimeError(f"Database validation failed before upload: {db_path}")
+            atomic_upload_object(config, r2_key_for_db(db_path, data_dir), db_path)
 
 
 def append_yearly_csvs(rows: list[NavRow], data_dir: Path = DATA_DIR) -> None:
@@ -392,12 +449,16 @@ def main(argv: list[str] | None = None) -> int:
         db_paths = db_paths_for_rows(rows, args.data_dir)
         r2_config = R2Config.from_env() if args.r2_sync else None
         if r2_config:
-            sync_down_databases_from_r2(db_paths, args.data_dir, r2_config)
-        updated_db_paths = update_databases(rows, seen_on, args.data_dir)
-        append_yearly_csvs(rows, args.data_dir)
-        write_latest_csv(args.latest_csv, rows)
-        if r2_config:
-            sync_up_databases_to_r2(updated_db_paths, args.data_dir, r2_config)
+            with r2_lock(r2_config):
+                sync_down_databases_from_r2(db_paths, args.data_dir, r2_config)
+                updated_db_paths = update_databases(rows, seen_on, args.data_dir)
+                append_yearly_csvs(rows, args.data_dir)
+                write_latest_csv(args.latest_csv, rows)
+                sync_up_databases_to_r2(updated_db_paths, args.data_dir, r2_config)
+        else:
+            update_databases(rows, seen_on, args.data_dir)
+            append_yearly_csvs(rows, args.data_dir)
+            write_latest_csv(args.latest_csv, rows)
     except Exception:
         logging.exception("NAV update failed")
         return 1

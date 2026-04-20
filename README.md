@@ -7,6 +7,7 @@ The project is an append-only time-series warehouse with scheme metadata trackin
 ## What This Builds
 
 - Combined SQLite archive in R2: `db/nav.db`
+- Two rolling master DB backups in R2: `db/nav.db.bak1` and `db/nav.db.bak2`
 - Financial-year SQLite archives in R2: `db/nav_fy_YYYY_YY.db`
 - Append-only financial-year CSV exports in Git: `data/nav_fy_YYYY_YY.csv`
 - Latest NAV snapshot in Git: `latest_nav.csv`
@@ -96,6 +97,8 @@ Tracks:
 - `nav`
 - `ingested_at`
 
+NAV values are parsed as Python `Decimal`, rounded to exactly four decimal places, and stored as canonical text such as `12.3456`. This avoids binary floating-point drift while keeping SQLite queries simple.
+
 Duplicate protection is enforced with:
 
 ```sql
@@ -161,14 +164,20 @@ Objects are stored under the optional prefix:
 
 ```text
 <R2_PREFIX>/db/nav.db
+<R2_PREFIX>/db/nav.db.bak1
+<R2_PREFIX>/db/nav.db.bak2
 <R2_PREFIX>/db/nav_fy_2026_27.db
+<R2_PREFIX>/lock/nav.lock
 ```
 
 If `R2_PREFIX` is blank, objects are stored as:
 
 ```text
 db/nav.db
+db/nav.db.bak1
+db/nav.db.bak2
 db/nav_fy_2026_27.db
+lock/nav.lock
 ```
 
 ## Local Usage
@@ -204,11 +213,15 @@ venv\Scripts\python.exe scripts\fetch_and_update.py --r2-sync
 With `--r2-sync`, the updater:
 
 1. Loads `.env` if present
-2. Downloads the relevant SQLite DBs from R2
-3. Applies the latest AMFI rows
-4. Appends new rows to yearly CSV files
-5. Exports `latest_nav.csv`
-6. Uploads the updated SQLite DBs back to R2
+2. Acquires the R2 lock at `lock/nav.lock`
+3. Downloads the relevant SQLite DBs from R2
+4. Applies the latest AMFI rows using batched SQLite writes
+5. Appends new rows to yearly CSV files
+6. Exports `latest_nav.csv`
+7. Validates each SQLite DB before upload
+8. Uploads each DB through a temp object and promotes it after verification
+9. Maintains `db/nav.db.bak1` and `db/nav.db.bak2` for the master database
+10. Releases the R2 lock
 
 Local outputs:
 
@@ -247,14 +260,18 @@ The updater does the following:
 7. Requires exactly 6 columns
 8. Validates NAV as a number
 9. Validates NAV date
-10. Ignores rows before `2026-04-01`
-11. Downloads matching DBs from R2 when `--r2-sync` is enabled
-12. Upserts scheme metadata
-13. Inserts NAV facts with `INSERT OR IGNORE`
-14. Marks schemes inactive if not seen for more than 30 days
-15. Appends new yearly CSV rows to `data/nav_fy_YYYY_YY.csv`
-16. Exports `latest_nav.csv`
-17. Uploads SQLite databases to R2 when `--r2-sync` is enabled
+10. Converts NAV to `Decimal` with exactly four decimal places
+11. Ignores rows before `2026-04-01`
+12. Downloads matching DBs from R2 when `--r2-sync` is enabled
+13. Upserts scheme metadata in batches
+14. Inserts NAV facts in batches with `INSERT OR IGNORE`
+15. Marks schemes inactive if not seen for more than 30 days
+16. Appends new yearly CSV rows to `data/nav_fy_YYYY_YY.csv`
+17. Exports `latest_nav.csv`
+18. Validates SQLite databases before upload
+19. Uploads SQLite databases atomically to R2 when `--r2-sync` is enabled
+
+R2 operations use retry logic for transient network/server failures.
 
 Bad rows are logged and skipped. A single malformed AMFI row should not crash the daily update.
 
@@ -273,6 +290,21 @@ scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,nav,nav_date
 ```
 
 CSV files are meant for Git storage, inspection, spreadsheet use, and lightweight downstream jobs. SQLite databases remain the canonical query storage.
+
+## R2 Safety Model
+
+The R2 sync path is designed to avoid partial or competing updates:
+
+- Concurrency lock: `lock/nav.lock`
+- Temp upload object: `db/nav.db.tmp` or `db/nav_fy_YYYY_YY.db.tmp`
+- Verification: temp object must exist before promotion
+- Promotion: temp object is copied over the final DB key
+- Cleanup: temp object is deleted after final verification
+- Master backups: before replacing `db/nav.db`, the updater rotates:
+  - `db/nav.db.bak1` to `db/nav.db.bak2`
+  - `db/nav.db` to `db/nav.db.bak1`
+
+SQLite validation runs before any DB upload. If validation fails, upload is blocked.
 
 ## GitHub Actions Automation
 
@@ -389,6 +421,11 @@ The test suite covers:
 - Index creation
 - Yearly CSV export
 - R2 environment and object-key behavior
+- R2 retry behavior
+- R2 lock object behavior
+- Atomic upload and master backup rotation
+- Validation-before-upload
+- Decimal NAV quantization and REAL-to-TEXT migration
 - Validator success and failure cases
 
 Run:
@@ -404,6 +441,7 @@ venv\Scripts\python.exe -m unittest discover -s tests
 - NAV rows are not assumed to arrive daily for every scheme.
 - Backdated NAV rows are accepted if they are on or after `2026-04-01`.
 - Duplicate facts are ignored using the database constraint.
+- SQLite writes are batched for update performance.
 - Scheme names are refreshed because AMFI can rename schemes under the same scheme code.
 - Discontinued schemes are inferred by absence, not by deletion.
 - SQLite DBs are durable in R2; CSVs are durable in Git.

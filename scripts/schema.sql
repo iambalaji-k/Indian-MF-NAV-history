@@ -1,5 +1,5 @@
 PRAGMA foreign_keys = ON;
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 
 CREATE TABLE IF NOT EXISTS schema_metadata (
     key TEXT PRIMARY KEY,
@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS schema_metadata (
 );
 
 INSERT INTO schema_metadata (key, value, updated_at)
-VALUES ('schema_version', '2', CURRENT_TIMESTAMP)
+VALUES ('schema_version', '3', CURRENT_TIMESTAMP)
 ON CONFLICT(key) DO UPDATE SET
     value = excluded.value,
     updated_at = excluded.updated_at;
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS nav_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     scheme_code INTEGER NOT NULL,
     nav_date TEXT NOT NULL,
-    nav REAL NOT NULL,
+    nav TEXT NOT NULL,
     ingested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (scheme_code) REFERENCES schemes (scheme_code),
     UNIQUE (scheme_code, nav_date)

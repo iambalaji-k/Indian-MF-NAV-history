@@ -76,8 +76,8 @@ def validate_database(db_path: Path, gap_days: int = 45, jump_threshold: float =
                 SELECT
                     scheme_code,
                     nav_date,
-                    nav,
-                    LAG(nav) OVER (PARTITION BY scheme_code ORDER BY nav_date) AS previous_nav
+                    CAST(nav AS REAL) AS nav,
+                    LAG(CAST(nav AS REAL)) OVER (PARTITION BY scheme_code ORDER BY nav_date) AS previous_nav
                 FROM nav_history
             )
             SELECT scheme_code, nav_date, previous_nav, nav
