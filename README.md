@@ -9,7 +9,8 @@ The project is an append-only time-series warehouse with scheme metadata trackin
 - Combined SQLite archive in R2: `db/nav.db`
 - Two rolling master DB backups in R2: `db/nav.db.bak1` and `db/nav.db.bak2`
 - Financial-year SQLite archives in R2: `db/nav_fy_YYYY_YY.db`
-- Append-only financial-year CSV exports in Git: `data/nav_fy_YYYY_YY.csv`
+- Compact append-only financial-year NAV CSV exports in Git: `data/nav_fy_YYYY_YY.csv`
+- Scheme metadata dimension CSV in Git: `data/schemes.csv`
 - Latest NAV snapshot in Git: `latest_nav.csv`
 - Daily automation through GitHub Actions
 - Validation checks for suspicious NAV data
@@ -49,6 +50,7 @@ Rows dated before 1 April 2026 are treated as discontinued or out-of-scope histo
 |   `-- workflows/
 |       `-- update.yml
 |-- data/
+|   |-- schemes.csv
 |   `-- nav_fy_YYYY_YY.csv
 |-- scripts/
 |   |-- fetch_and_update.py
@@ -216,12 +218,13 @@ With `--r2-sync`, the updater:
 2. Acquires the R2 lock at `lock/nav.lock`
 3. Downloads the relevant SQLite DBs from R2
 4. Applies the latest AMFI rows using batched SQLite writes
-5. Appends new rows to yearly CSV files
-6. Exports `latest_nav.csv`
-7. Validates each SQLite DB before upload
-8. Uploads each DB through a temp object and promotes it after verification
-9. Maintains `db/nav.db.bak1` and `db/nav.db.bak2` for the master database
-10. Releases the R2 lock
+5. Appends new rows to yearly NAV CSV files
+6. Rewrites `data/schemes.csv` from the combined DB
+7. Exports `latest_nav.csv`
+8. Validates each SQLite DB before upload
+9. Uploads each DB through a temp object and promotes it after verification
+10. Maintains `db/nav.db.bak1` and `db/nav.db.bak2` for the master database
+11. Releases the R2 lock
 
 Local outputs:
 
@@ -229,6 +232,7 @@ Local outputs:
 data/nav.db
 data/nav_fy_YYYY_YY.db
 data/nav_fy_YYYY_YY.csv
+data/schemes.csv
 latest_nav.csv
 logs/update.log
 ```
@@ -266,10 +270,11 @@ The updater does the following:
 13. Upserts scheme metadata in batches
 14. Inserts NAV facts in batches with `INSERT OR IGNORE`
 15. Marks schemes inactive if not seen for more than 30 days
-16. Appends new yearly CSV rows to `data/nav_fy_YYYY_YY.csv`
-17. Exports `latest_nav.csv`
-18. Validates SQLite databases before upload
-19. Uploads SQLite databases atomically to R2 when `--r2-sync` is enabled
+16. Appends new yearly NAV CSV rows to `data/nav_fy_YYYY_YY.csv`
+17. Rewrites `data/schemes.csv` from the combined database
+18. Exports `latest_nav.csv`
+19. Validates SQLite databases before upload
+20. Uploads SQLite databases atomically to R2 when `--r2-sync` is enabled
 
 R2 operations use retry logic for transient network/server failures.
 
@@ -277,17 +282,31 @@ Bad rows are logged and skipped. A single malformed AMFI row should not crash th
 
 ## CSV Outputs
 
-`latest_nav.csv` contains the valid rows from the most recent AMFI fetch after filtering and validation.
+CSV storage is normalized to avoid repeating scheme metadata on every NAV row.
+
+### NAV Fact CSVs
+
+`latest_nav.csv` contains the valid NAV rows from the most recent AMFI fetch after filtering and validation.
 
 Yearly CSVs contain the archive rows for each financial year. They are row-oriented and append-only for Git efficiency: each NAV update is stored as a new row keyed by `scheme_code` and `nav_date`.
 
 The CSVs do not pivot NAV dates into columns. New NAV dates should add rows, not rewrite headers or add date columns.
 
-Both CSV output types use this column format:
+NAV fact CSVs use this compact column format:
 
 ```text
-scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,nav,nav_date
+scheme_code,nav,nav_date
 ```
+
+### Scheme Dimension CSV
+
+`data/schemes.csv` stores scheme metadata separately:
+
+```text
+scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,first_seen_date,last_seen_date,is_active
+```
+
+Join `data/nav_fy_YYYY_YY.csv` to `data/schemes.csv` on `scheme_code` when metadata is needed.
 
 CSV files are meant for Git storage, inspection, spreadsheet use, and lightweight downstream jobs. SQLite databases remain the canonical query storage.
 
@@ -420,6 +439,7 @@ The test suite covers:
 - Pre-2026-04-01 data being ignored
 - Index creation
 - Yearly CSV export
+- Separate schemes dimension CSV export
 - R2 environment and object-key behavior
 - R2 retry behavior
 - R2 lock object behavior

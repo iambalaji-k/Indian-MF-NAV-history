@@ -16,6 +16,7 @@ from scripts.fetch_and_update import (
     sync_up_databases_to_r2,
     update_databases,
     write_latest_csv,
+    write_schemes_csv,
 )
 from scripts.r2_storage import R2Config
 
@@ -233,17 +234,54 @@ class FetchAndUpdateTests(unittest.TestCase):
 
             self.assertEqual(csv_rows[0], [
                 "scheme_code",
-                "isin_payout_or_growth",
-                "isin_reinvestment",
-                "scheme_name",
                 "nav",
                 "nav_date",
             ])
             self.assertEqual(len(csv_rows), 3)
             self.assertEqual(csv_rows[1][0], "100001")
-            self.assertEqual(csv_rows[1][4], "10.0000")
+            self.assertEqual(csv_rows[1][1], "10.0000")
             self.assertEqual(csv_rows[2][0], "100002")
             self.assertEqual(csv_rows[0][-1], "nav_date")
+
+    def test_latest_csv_contains_only_nav_fact_columns(self) -> None:
+        with WorkspaceTemporaryDirectory() as tmp:
+            latest_csv = Path(tmp) / "latest_nav.csv"
+            rows, _ = parse_nav_text(sample_line())
+
+            write_latest_csv(latest_csv, rows)
+
+            with latest_csv.open(newline="", encoding="utf-8") as handle:
+                csv_rows = list(csv.reader(handle))
+
+            self.assertEqual(csv_rows[0], ["scheme_code", "nav", "nav_date"])
+            self.assertEqual(csv_rows[1], ["100001", "12.3456", "2026-04-01"])
+
+    def test_schemes_csv_contains_dimension_columns(self) -> None:
+        with WorkspaceTemporaryDirectory() as tmp:
+            data_dir = Path(tmp) / "data"
+            schemes_csv = data_dir / "schemes.csv"
+            rows, _ = parse_nav_text(sample_line(100001, "Scheme Dimension Fund", "10.00", "01-Apr-2026"))
+
+            update_databases(rows, date(2026, 4, 2), data_dir)
+            write_schemes_csv(data_dir / "nav.db", schemes_csv)
+
+            with schemes_csv.open(newline="", encoding="utf-8") as handle:
+                csv_rows = list(csv.reader(handle))
+
+            self.assertEqual(
+                csv_rows[0],
+                [
+                    "scheme_code",
+                    "isin_payout_or_growth",
+                    "isin_reinvestment",
+                    "scheme_name",
+                    "first_seen_date",
+                    "last_seen_date",
+                    "is_active",
+                ],
+            )
+            self.assertEqual(csv_rows[1][0], "100001")
+            self.assertEqual(csv_rows[1][3], "Scheme Dimension Fund")
 
     def test_existing_real_nav_column_is_migrated_to_text(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:

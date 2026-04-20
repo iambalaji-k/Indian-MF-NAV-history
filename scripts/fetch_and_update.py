@@ -31,6 +31,7 @@ LOG_DIR = ROOT_DIR / "logs"
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 COMBINED_DB = DATA_DIR / "nav.db"
 LATEST_CSV = ROOT_DIR / "latest_nav.csv"
+SCHEMES_CSV = DATA_DIR / "schemes.csv"
 NAV_QUANT = Decimal("0.0001")
 
 SCHEME_LINE_RE = re.compile(r"^\s*\d+\s*;")
@@ -285,36 +286,31 @@ def write_latest_csv(path: Path, rows: list[NavRow]) -> None:
     sorted_rows = sorted(rows, key=lambda row: (row.scheme_code, row.nav_date))
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(
-            [
-                "scheme_code",
-                "isin_payout_or_growth",
-                "isin_reinvestment",
-                "scheme_name",
-                "nav",
-                "nav_date",
-            ]
-        )
+        writer.writerow(NAV_CSV_HEADER)
         for row in sorted_rows:
             writer.writerow(
                 [
                     row.scheme_code,
-                    row.isin_payout_or_growth or "",
-                    row.isin_reinvestment or "",
-                    row.scheme_name,
                     format_nav(row.nav),
                     row.nav_date.isoformat(),
                 ]
             )
 
 
-CSV_HEADER = [
+NAV_CSV_HEADER = [
+    "scheme_code",
+    "nav",
+    "nav_date",
+]
+
+SCHEME_CSV_HEADER = [
     "scheme_code",
     "isin_payout_or_growth",
     "isin_reinvestment",
     "scheme_name",
-    "nav",
-    "nav_date",
+    "first_seen_date",
+    "last_seen_date",
+    "is_active",
 ]
 
 
@@ -342,7 +338,7 @@ def append_yearly_csv_rows(csv_path: Path, rows: list[NavRow]) -> int:
     with csv_path.open("a", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         if not file_exists:
-            writer.writerow(CSV_HEADER)
+            writer.writerow(NAV_CSV_HEADER)
 
         for row in rows:
             key = (row.scheme_code, row.nav_date.isoformat())
@@ -351,9 +347,6 @@ def append_yearly_csv_rows(csv_path: Path, rows: list[NavRow]) -> int:
             writer.writerow(
                 [
                     row.scheme_code,
-                    row.isin_payout_or_growth or "",
-                    row.isin_reinvestment or "",
-                    row.scheme_name,
                     format_nav(row.nav),
                     row.nav_date.isoformat(),
                 ]
@@ -394,6 +387,28 @@ def append_yearly_csvs(rows: list[NavRow], data_dir: Path = DATA_DIR) -> None:
         logging.info("Appended %s rows to yearly CSV %s", appended, csv_path)
 
 
+def write_schemes_csv(db_path: Path, csv_path: Path = SCHEMES_CSV) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(db_path)) as conn, csv_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(SCHEME_CSV_HEADER)
+        for row in conn.execute(
+            """
+            SELECT
+                scheme_code,
+                COALESCE(isin_payout_or_growth, ''),
+                COALESCE(isin_reinvestment, ''),
+                scheme_name,
+                first_seen_date,
+                last_seen_date,
+                is_active
+            FROM schemes
+            ORDER BY scheme_code
+            """
+        ):
+            writer.writerow(row)
+
+
 def update_databases(rows: list[NavRow], seen_on: date, data_dir: Path = DATA_DIR) -> set[Path]:
     combined_db = data_dir / "nav.db"
     combined_inserted, combined_active = upsert_rows(combined_db, rows, seen_on)
@@ -427,6 +442,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input", help="Read AMFI text from a local fixture instead of fetching.")
     parser.add_argument("--data-dir", type=Path, default=DATA_DIR)
     parser.add_argument("--latest-csv", type=Path, default=LATEST_CSV)
+    parser.add_argument("--schemes-csv", type=Path, default=SCHEMES_CSV)
     parser.add_argument("--log-file", type=Path, default=LOG_DIR / "update.log")
     parser.add_argument("--seen-on", help="Override ingestion date as YYYY-MM-DD, mainly for tests.")
     parser.add_argument("--retries", type=int, default=3)
@@ -453,11 +469,13 @@ def main(argv: list[str] | None = None) -> int:
                 sync_down_databases_from_r2(db_paths, args.data_dir, r2_config)
                 updated_db_paths = update_databases(rows, seen_on, args.data_dir)
                 append_yearly_csvs(rows, args.data_dir)
+                write_schemes_csv(args.data_dir / "nav.db", args.schemes_csv)
                 write_latest_csv(args.latest_csv, rows)
                 sync_up_databases_to_r2(updated_db_paths, args.data_dir, r2_config)
         else:
             update_databases(rows, seen_on, args.data_dir)
             append_yearly_csvs(rows, args.data_dir)
+            write_schemes_csv(args.data_dir / "nav.db", args.schemes_csv)
             write_latest_csv(args.latest_csv, rows)
     except Exception:
         logging.exception("NAV update failed")
