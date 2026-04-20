@@ -243,7 +243,7 @@ class FetchAndUpdateTests(unittest.TestCase):
             self.assertEqual(csv_rows[1][0], "100001")
             self.assertEqual(csv_rows[1][1], "10.0000")
 
-    def test_latest_csv_contains_only_nav_fact_columns(self) -> None:
+    def test_latest_csv_contains_full_metadata_columns(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:
             latest_csv = Path(tmp) / "latest_nav.csv"
             rows, _ = parse_nav_text(sample_line())
@@ -253,8 +253,11 @@ class FetchAndUpdateTests(unittest.TestCase):
             with latest_csv.open(newline="", encoding="utf-8") as handle:
                 csv_rows = list(csv.reader(handle))
 
-            self.assertEqual(csv_rows[0], ["scheme_code", "nav", "nav_date"])
-            self.assertEqual(csv_rows[1], ["100001", "12.3456", "2026-04-01"])
+            self.assertEqual(
+                csv_rows[0],
+                ["scheme_code", "isin_payout_or_growth", "isin_reinvestment", "scheme_name", "nav", "nav_date"],
+            )
+            self.assertEqual(csv_rows[1], ["100001", "INF000000001", "", "Example Fund - Growth", "12.3456", "2026-04-01"])
 
     def test_schemes_csv_contains_dimension_columns(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:

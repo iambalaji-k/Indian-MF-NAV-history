@@ -289,11 +289,14 @@ def write_latest_csv(path: Path, rows: list[NavRow]) -> None:
     sorted_rows = sorted(rows, key=lambda row: (row.scheme_code, row.nav_date))
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(NAV_CSV_HEADER)
+        writer.writerow(LATEST_NAV_CSV_HEADER)
         for row in sorted_rows:
             writer.writerow(
                 [
                     row.scheme_code,
+                    row.isin_payout_or_growth or "",
+                    row.isin_reinvestment or "",
+                    row.scheme_name,
                     format_nav(row.nav),
                     row.nav_date.isoformat(),
                 ]
@@ -302,6 +305,15 @@ def write_latest_csv(path: Path, rows: list[NavRow]) -> None:
 
 NAV_CSV_HEADER = [
     "scheme_code",
+    "nav",
+    "nav_date",
+]
+
+LATEST_NAV_CSV_HEADER = [
+    "scheme_code",
+    "isin_payout_or_growth",
+    "isin_reinvestment",
+    "scheme_name",
     "nav",
     "nav_date",
 ]
