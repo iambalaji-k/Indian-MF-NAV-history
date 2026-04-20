@@ -190,6 +190,12 @@ cython_debug/
 
 # Ruff stuff:
 .ruff_cache/
+.test-tmp/
+
+# Generated local runtime artifacts
+logs/
+data/*.db
+data/*.db-*
 
 # PyPI configuration file
 .pypirc

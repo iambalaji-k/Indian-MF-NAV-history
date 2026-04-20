@@ -1,0 +1,50 @@
+name: Daily NAV update
+
+on:
+  schedule:
+    - cron: "30 13 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch and update NAV archive
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_PREFIX: ${{ secrets.R2_PREFIX }}
+        run: python scripts/fetch_and_update.py --r2-sync
+
+      - name: Validate archive
+        run: python scripts/validator.py
+
+      - name: Commit changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add latest_nav.csv
+          if [ -d data ]; then
+            find data -name "*.csv" -print0 | xargs -0 --no-run-if-empty git add
+          fi
+          if git diff --cached --quiet; then
+            echo "No NAV changes to commit"
+          else
+            git commit -m "Daily NAV update"
+            git push
+          fi
