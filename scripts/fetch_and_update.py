@@ -16,10 +16,17 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 
 try:
-    from scripts.r2_storage import R2Config, atomic_upload_object, download_object, load_dotenv, r2_lock
+    from scripts.r2_storage import (
+        R2Config,
+        atomic_upload_object,
+        download_object,
+        file_sha256,
+        load_dotenv,
+        r2_lock,
+    )
     from scripts.validator import validate_database
 except ModuleNotFoundError:
-    from r2_storage import R2Config, atomic_upload_object, download_object, load_dotenv, r2_lock
+    from r2_storage import R2Config, atomic_upload_object, download_object, file_sha256, load_dotenv, r2_lock
     from validator import validate_database
 
 
@@ -156,10 +163,6 @@ def financial_year_label(nav_date: date) -> str:
 
 def fy_db_path(nav_date: date, data_dir: Path = DATA_DIR) -> Path:
     return data_dir / f"nav_fy_{financial_year_label(nav_date)}.db"
-
-
-def fy_csv_path(nav_date: date, data_dir: Path = DATA_DIR) -> Path:
-    return data_dir / f"nav_fy_{financial_year_label(nav_date)}.csv"
 
 
 def r2_key_for_db(db_path: Path, data_dir: Path = DATA_DIR) -> str:
@@ -314,36 +317,18 @@ SCHEME_CSV_HEADER = [
 ]
 
 
-def read_existing_csv_keys(csv_path: Path) -> set[tuple[int, str]]:
-    if not csv_path.exists():
-        return set()
+def write_daily_run_csv(data_dir: Path, rows: list[NavRow], seen_on: date) -> Path:
+    year = seen_on.year
+    month = f"{seen_on.month:02d}"
+    folder = data_dir / str(year) / month
+    folder.mkdir(parents=True, exist_ok=True)
+    csv_path = folder / f"nav_{seen_on.isoformat()}.csv"
 
-    keys: set[tuple[int, str]] = set()
-    with csv_path.open(newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            try:
-                keys.add((int(row["scheme_code"]), row["nav_date"]))
-            except (KeyError, TypeError, ValueError):
-                logging.warning("Ignoring malformed existing CSV row in %s: %s", csv_path, row)
-    return keys
-
-
-def append_yearly_csv_rows(csv_path: Path, rows: list[NavRow]) -> int:
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    existing_keys = read_existing_csv_keys(csv_path)
-    file_exists = csv_path.exists() and csv_path.stat().st_size > 0
-    appended = 0
-
-    with csv_path.open("a", newline="", encoding="utf-8") as handle:
+    sorted_rows = sorted(rows, key=lambda row: (row.scheme_code, row.nav_date))
+    with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        if not file_exists:
-            writer.writerow(NAV_CSV_HEADER)
-
-        for row in rows:
-            key = (row.scheme_code, row.nav_date.isoformat())
-            if key in existing_keys:
-                continue
+        writer.writerow(NAV_CSV_HEADER)
+        for row in sorted_rows:
             writer.writerow(
                 [
                     row.scheme_code,
@@ -351,10 +336,8 @@ def append_yearly_csv_rows(csv_path: Path, rows: list[NavRow]) -> int:
                     row.nav_date.isoformat(),
                 ]
             )
-            existing_keys.add(key)
-            appended += 1
-
-    return appended
+    logging.info("Wrote daily run CSV: %s", csv_path)
+    return csv_path
 
 
 def db_paths_for_rows(rows: list[NavRow], data_dir: Path = DATA_DIR) -> set[Path]:
@@ -369,22 +352,21 @@ def sync_down_databases_from_r2(db_paths: set[Path], data_dir: Path, config: R2C
         download_object(config, r2_key_for_db(db_path, data_dir), db_path)
 
 
-def sync_up_databases_to_r2(db_paths: set[Path], data_dir: Path, config: R2Config) -> None:
-    for db_path in sorted(db_paths):
-        if db_path.exists():
-            if validate_database(db_path) != 0:
-                raise RuntimeError(f"Database validation failed before upload: {db_path}")
-            atomic_upload_object(config, r2_key_for_db(db_path, data_dir), db_path)
+def sync_up_databases_to_r2(db_hashes: dict[Path, str], data_dir: Path, config: R2Config) -> None:
+    for db_path, old_hash in sorted(db_hashes.items()):
+        if not db_path.exists():
+            continue
 
+        new_hash = file_sha256(db_path)
+        if new_hash == old_hash:
+            logging.info("Database unchanged, skipping upload: %s", db_path)
+            continue
 
-def append_yearly_csvs(rows: list[NavRow], data_dir: Path = DATA_DIR) -> None:
-    rows_by_csv: dict[Path, list[NavRow]] = {}
-    for row in rows:
-        rows_by_csv.setdefault(fy_csv_path(row.nav_date, data_dir), []).append(row)
+        if validate_database(db_path) != 0:
+            raise RuntimeError(f"Database validation failed before upload: {db_path}")
 
-    for csv_path, csv_rows in sorted(rows_by_csv.items()):
-        appended = append_yearly_csv_rows(csv_path, csv_rows)
-        logging.info("Appended %s rows to yearly CSV %s", appended, csv_path)
+        logging.info("Database changed (hash %s -> %s), uploading: %s", old_hash[:8], new_hash[:8], db_path)
+        atomic_upload_object(config, r2_key_for_db(db_path, data_dir), db_path, rotate_backups=True)
 
 
 def write_schemes_csv(db_path: Path, csv_path: Path = SCHEMES_CSV) -> None:
@@ -467,14 +449,15 @@ def main(argv: list[str] | None = None) -> int:
         if r2_config:
             with r2_lock(r2_config):
                 sync_down_databases_from_r2(db_paths, args.data_dir, r2_config)
-                updated_db_paths = update_databases(rows, seen_on, args.data_dir)
-                append_yearly_csvs(rows, args.data_dir)
+                db_hashes = {path: file_sha256(path) for path in db_paths}
+                update_databases(rows, seen_on, args.data_dir)
+                write_daily_run_csv(args.data_dir, rows, seen_on)
                 write_schemes_csv(args.data_dir / "nav.db", args.schemes_csv)
                 write_latest_csv(args.latest_csv, rows)
-                sync_up_databases_to_r2(updated_db_paths, args.data_dir, r2_config)
+                sync_up_databases_to_r2(db_hashes, args.data_dir, r2_config)
         else:
             update_databases(rows, seen_on, args.data_dir)
-            append_yearly_csvs(rows, args.data_dir)
+            write_daily_run_csv(args.data_dir, rows, seen_on)
             write_schemes_csv(args.data_dir / "nav.db", args.schemes_csv)
             write_latest_csv(args.latest_csv, rows)
     except Exception:

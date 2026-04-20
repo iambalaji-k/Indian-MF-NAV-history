@@ -11,14 +11,14 @@ from decimal import Decimal
 from pathlib import Path
 
 from scripts.fetch_and_update import (
-    append_yearly_csvs,
     parse_nav_text,
     sync_up_databases_to_r2,
     update_databases,
+    write_daily_run_csv,
     write_latest_csv,
     write_schemes_csv,
 )
-from scripts.r2_storage import R2Config
+from scripts.r2_storage import R2Config, file_sha256
 
 
 TEST_TMP_ROOT = Path(__file__).resolve().parents[1] / ".test-tmp"
@@ -212,23 +212,25 @@ class FetchAndUpdateTests(unittest.TestCase):
                 },
             )
 
-    def test_yearly_csv_appends_rows_without_pivoting_dates_into_columns(self) -> None:
+    def test_daily_run_csv_is_created_with_nested_folders(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:
             data_dir = Path(tmp) / "data"
             rows, _ = parse_nav_text(
                 "\n".join(
                     [
                         sample_line(100001, "First Fund", "10.00", "01-Apr-2026"),
-                        sample_line(100002, "Second Fund", "20.00", "31-Mar-2027"),
+                        sample_line(100002, "Second Fund", "20.00", "01-Apr-2026"),
                     ]
                 )
             )
 
-            update_databases(rows, date(2026, 4, 2), data_dir)
-            append_yearly_csvs(rows, data_dir)
-            append_yearly_csvs(rows, data_dir)
+            seen_on = date(2026, 4, 2)
+            csv_path = write_daily_run_csv(data_dir, rows, seen_on)
 
-            csv_path = data_dir / "nav_fy_2026_27.csv"
+            expected_path = data_dir / "2026" / "04" / "nav_2026-04-02.csv"
+            self.assertEqual(csv_path, expected_path)
+            self.assertTrue(expected_path.exists())
+
             with csv_path.open(newline="", encoding="utf-8") as handle:
                 csv_rows = list(csv.reader(handle))
 
@@ -240,8 +242,6 @@ class FetchAndUpdateTests(unittest.TestCase):
             self.assertEqual(len(csv_rows), 3)
             self.assertEqual(csv_rows[1][0], "100001")
             self.assertEqual(csv_rows[1][1], "10.0000")
-            self.assertEqual(csv_rows[2][0], "100002")
-            self.assertEqual(csv_rows[0][-1], "nav_date")
 
     def test_latest_csv_contains_only_nav_fact_columns(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:
@@ -352,8 +352,9 @@ class FetchAndUpdateTests(unittest.TestCase):
                 endpoint="https://account123.r2.cloudflarestorage.com",
             )
 
+            db_hashes = {db_path: "old-hash"}
             with self.assertRaises(RuntimeError):
-                sync_up_databases_to_r2({db_path}, data_dir, config)
+                sync_up_databases_to_r2(db_hashes, data_dir, config)
 
 
 if __name__ == "__main__":

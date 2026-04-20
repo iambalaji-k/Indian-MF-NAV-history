@@ -280,11 +280,21 @@ def rotate_master_backups(config: R2Config, master_key: str) -> None:
     copy_object(config, master_key, backup_1)
 
 
-def atomic_upload_object(config: R2Config, key: str, source: Path) -> None:
+def file_sha256(path: Path) -> str:
+    if not path.exists():
+        return ""
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def atomic_upload_object(config: R2Config, key: str, source: Path, rotate_backups: bool = True) -> None:
     temp_key = f"{key}.tmp"
     upload_object(config, temp_key, source)
     verify_object_exists(config, temp_key)
-    if key == "db/nav.db":
+    if rotate_backups and key == "db/nav.db":
         rotate_master_backups(config, key)
     copy_object(config, temp_key, key)
     verify_object_exists(config, key)

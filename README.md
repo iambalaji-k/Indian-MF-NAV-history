@@ -9,7 +9,7 @@ The project is an append-only time-series warehouse with scheme metadata trackin
 - Combined SQLite archive in R2: `db/nav.db`
 - Two rolling master DB backups in R2: `db/nav.db.bak1` and `db/nav.db.bak2`
 - Financial-year SQLite archives in R2: `db/nav_fy_YYYY_YY.db`
-- Compact append-only financial-year NAV CSV exports in Git: `data/nav_fy_YYYY_YY.csv`
+- Daily run NAV CSV exports in Git: `data/YYYY/MM/nav_YYYY-MM-DD.csv`
 - Scheme metadata dimension CSV in Git: `data/schemes.csv`
 - Latest NAV snapshot in Git: `latest_nav.csv`
 - Daily automation through GitHub Actions
@@ -50,8 +50,10 @@ Rows dated before 1 April 2026 are treated as discontinued or out-of-scope histo
 |   `-- workflows/
 |       `-- update.yml
 |-- data/
-|   |-- schemes.csv
-|   `-- nav_fy_YYYY_YY.csv
+|   |-- YYYY/
+|   |   `-- MM/
+|   |       `-- nav_YYYY-MM-DD.csv
+|   `-- schemes.csv
 |-- scripts/
 |   |-- fetch_and_update.py
 |   |-- r2_storage.py
@@ -126,19 +128,22 @@ The schema creates indexes for the main access paths:
 
 ## Financial Year Storage
 
-The archive writes each row to three outputs:
+The archive writes each row to two outputs:
 
 1. Combined SQLite DB, uploaded to R2 as `db/nav.db`
 2. Matching financial-year SQLite DB, uploaded to R2 as `db/nav_fy_YYYY_YY.db`
-3. Matching financial-year CSV, appended in Git as `data/nav_fy_YYYY_YY.csv`
+
+Each daily run also generates a separate CSV export:
+
+3. Run-specific NAV CSV, stored in Git as `data/YYYY/MM/nav_YYYY-MM-DD.csv`
 
 Indian financial years are calculated from 1 April to 31 March.
 
-| NAV Date | R2 DB | Git CSV |
-|---|---|---|
-| `2026-04-01` | `db/nav_fy_2026_27.db` | `data/nav_fy_2026_27.csv` |
-| `2027-03-31` | `db/nav_fy_2026_27.db` | `data/nav_fy_2026_27.csv` |
-| `2027-04-01` | `db/nav_fy_2027_28.db` | `data/nav_fy_2027_28.csv` |
+| NAV Date | R2 DB |
+|---|---|
+| `2026-04-01` | `db/nav_fy_2026_27.db` |
+| `2027-03-31` | `db/nav_fy_2026_27.db` |
+| `2027-04-01` | `db/nav_fy_2027_28.db` |
 
 ## Cloudflare R2 Setup
 
@@ -217,21 +222,22 @@ With `--r2-sync`, the updater:
 1. Loads `.env` if present
 2. Acquires the R2 lock at `lock/nav.lock`
 3. Downloads the relevant SQLite DBs from R2
-4. Applies the latest AMFI rows using batched SQLite writes
-5. Appends new rows to yearly NAV CSV files
-6. Rewrites `data/schemes.csv` from the combined DB
-7. Exports `latest_nav.csv`
-8. Validates each SQLite DB before upload
-9. Uploads each DB through a temp object and promotes it after verification
-10. Maintains `db/nav.db.bak1` and `db/nav.db.bak2` for the master database
-11. Releases the R2 lock
+4. Records the SHA-256 hash of the current databases
+5. Applies the latest AMFI rows using batched SQLite writes
+6. Generates a daily run CSV at `data/YYYY/MM/nav_YYYY-MM-DD.csv`
+7. Rewrites `data/schemes.csv` from the combined DB
+8. Exports `latest_nav.csv`
+9. Validates each SQLite DB if it has changed
+10. Uploads each modified DB through a temp object and promotes it after verification
+11. Rotates `db/nav.db.bak1` and `db/nav.db.bak2` ONLY if the master database changed
+12. Releases the R2 lock
 
 Local outputs:
 
 ```text
 data/nav.db
 data/nav_fy_YYYY_YY.db
-data/nav_fy_YYYY_YY.csv
+data/YYYY/MM/nav_YYYY-MM-DD.csv
 data/schemes.csv
 latest_nav.csv
 logs/update.log
@@ -270,11 +276,11 @@ The updater does the following:
 13. Upserts scheme metadata in batches
 14. Inserts NAV facts in batches with `INSERT OR IGNORE`
 15. Marks schemes inactive if not seen for more than 30 days
-16. Appends new yearly NAV CSV rows to `data/nav_fy_YYYY_YY.csv`
+16. Writes the results of the daily run to `data/YYYY/MM/nav_YYYY-MM-DD.csv`
 17. Rewrites `data/schemes.csv` from the combined database
 18. Exports `latest_nav.csv`
-19. Validates SQLite databases before upload
-20. Uploads SQLite databases atomically to R2 when `--r2-sync` is enabled
+19. Validates changed SQLite databases before upload
+20. Uploads changed SQLite databases atomically to R2 when `--r2-sync` is enabled
 
 R2 operations use retry logic for transient network/server failures.
 
@@ -282,15 +288,17 @@ Bad rows are logged and skipped. A single malformed AMFI row should not crash th
 
 ## CSV Outputs
 
-CSV storage is normalized to avoid repeating scheme metadata on every NAV row.
+CSV storage is organized by run date to avoid large Git diffs in a single file and provide clear daily snapshots.
 
 ### NAV Fact CSVs
 
 `latest_nav.csv` contains the valid NAV rows from the most recent AMFI fetch after filtering and validation.
 
-Yearly CSVs contain the archive rows for each financial year. They are row-oriented and append-only for Git efficiency: each NAV update is stored as a new row keyed by `scheme_code` and `nav_date`.
+Daily run CSVs contain the results of each specific update. They are stored in a nested directory structure:
 
-The CSVs do not pivot NAV dates into columns. New NAV dates should add rows, not rewrite headers or add date columns.
+```text
+data/YYYY/MM/nav_YYYY-MM-DD.csv
+```
 
 NAV fact CSVs use this compact column format:
 
@@ -306,20 +314,21 @@ scheme_code,nav,nav_date
 scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,first_seen_date,last_seen_date,is_active
 ```
 
-Join `data/nav_fy_YYYY_YY.csv` to `data/schemes.csv` on `scheme_code` when metadata is needed.
+Join daily CSVs to `data/schemes.csv` on `scheme_code` when metadata is needed.
 
 CSV files are meant for Git storage, inspection, spreadsheet use, and lightweight downstream jobs. SQLite databases remain the canonical query storage.
 
 ## R2 Safety Model
 
-The R2 sync path is designed to avoid partial or competing updates:
+The R2 sync path is designed to avoid partial or redundant updates:
 
 - Concurrency lock: `lock/nav.lock`
+- Hash-based upload: only modified databases are uploaded to R2
 - Temp upload object: `db/nav.db.tmp` or `db/nav_fy_YYYY_YY.db.tmp`
 - Verification: temp object must exist before promotion
 - Promotion: temp object is copied over the final DB key
 - Cleanup: temp object is deleted after final verification
-- Master backups: before replacing `db/nav.db`, the updater rotates:
+- Master backups: before replacing `db/nav.db`, the updater rotates backups ONLY if the content has changed:
   - `db/nav.db.bak1` to `db/nav.db.bak2`
   - `db/nav.db` to `db/nav.db.bak1`
 
@@ -438,12 +447,12 @@ The test suite covers:
 - NAV date routed to the correct financial year
 - Pre-2026-04-01 data being ignored
 - Index creation
-- Yearly CSV export
+- Daily run CSV export with nested folders
 - Separate schemes dimension CSV export
 - R2 environment and object-key behavior
 - R2 retry behavior
 - R2 lock object behavior
-- Atomic upload and master backup rotation
+- Atomic upload and master backup rotation (only on change)
 - Validation-before-upload
 - Decimal NAV quantization and REAL-to-TEXT migration
 - Validator success and failure cases
@@ -456,7 +465,7 @@ venv\Scripts\python.exe -m unittest discover -s tests
 
 ## Design Notes
 
-- The archive is append-only for NAV facts.
+- The archive is append-only for NAV facts in SQLite.
 - Schemes are never deleted.
 - NAV rows are not assumed to arrive daily for every scheme.
 - Backdated NAV rows are accepted if they are on or after `2026-04-01`.
@@ -465,6 +474,7 @@ venv\Scripts\python.exe -m unittest discover -s tests
 - Scheme names are refreshed because AMFI can rename schemes under the same scheme code.
 - Discontinued schemes are inferred by absence, not by deletion.
 - SQLite DBs are durable in R2; CSVs are durable in Git.
+- Git storage uses daily partitioned files to keep diffs small and manageable.
 
 ## Requirements
 
