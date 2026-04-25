@@ -18,7 +18,7 @@ class ValidatorTests(unittest.TestCase):
             rows, _ = parse_nav_text(sample_line())
             update_databases(rows, date(2026, 4, 2), data_dir)
 
-            self.assertEqual(validate_database(data_dir / "nav.db"), 0)
+            self.assertEqual(validate_database(data_dir / "nav_fy_2026_27.db"), 0)
 
     def test_validator_rejects_missing_schema(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:

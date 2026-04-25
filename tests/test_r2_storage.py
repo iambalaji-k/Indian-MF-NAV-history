@@ -24,12 +24,11 @@ class R2StorageTests(unittest.TestCase):
             config = R2Config.from_env()
 
         self.assertEqual(config.endpoint, "https://account123.r2.cloudflarestorage.com")
-        self.assertEqual(config.object_key("db/nav.db"), "archive/db/nav.db")
+        self.assertEqual(config.object_key("db/nav_fy_2026_27.db"), "archive/db/nav_fy_2026_27.db")
 
     def test_r2_db_keys_are_stable(self) -> None:
         data_dir = Path("data")
 
-        self.assertEqual(r2_key_for_db(data_dir / "nav.db", data_dir), "db/nav.db")
         self.assertEqual(
             r2_key_for_db(data_dir / "nav_fy_2026_27.db", data_dir),
             "db/nav_fy_2026_27.db",
@@ -55,7 +54,7 @@ class R2StorageTests(unittest.TestCase):
         self.assertEqual(operation.call_count, 2)
         sleep.assert_called_once()
 
-    def test_atomic_master_upload_uses_tmp_verify_backups_and_promote(self) -> None:
+    def test_atomic_db_upload_uses_tmp_verify_backups_and_promote(self) -> None:
         config = R2Config(
             account_id="account123",
             bucket="nav-archive",
@@ -64,7 +63,7 @@ class R2StorageTests(unittest.TestCase):
             endpoint="https://account123.r2.cloudflarestorage.com",
         )
         with WorkspaceTemporaryDirectory() as tmp:
-            source = Path(tmp) / "nav.db"
+            source = Path(tmp) / "nav_fy_2026_27.db"
             source.write_bytes(b"sqlite")
 
             with (
@@ -73,18 +72,18 @@ class R2StorageTests(unittest.TestCase):
                 patch("scripts.r2_storage.copy_object") as copy,
                 patch("scripts.r2_storage.delete_object") as delete,
             ):
-                atomic_upload_object(config, "db/nav.db", source)
+                atomic_upload_object(config, "db/nav_fy_2026_27.db", source)
 
-        upload.assert_called_once_with(config, "db/nav.db.tmp", source)
-        verify.assert_has_calls([call(config, "db/nav.db.tmp"), call(config, "db/nav.db")])
+        upload.assert_called_once_with(config, "db/nav_fy_2026_27.db.tmp", source)
+        verify.assert_has_calls([call(config, "db/nav_fy_2026_27.db.tmp"), call(config, "db/nav_fy_2026_27.db")])
         copy.assert_has_calls(
             [
-                call(config, "db/nav.db.bak1", "db/nav.db.bak2"),
-                call(config, "db/nav.db", "db/nav.db.bak1"),
-                call(config, "db/nav.db.tmp", "db/nav.db"),
+                call(config, "db/nav_fy_2026_27.db.bak1", "db/nav_fy_2026_27.db.bak2"),
+                call(config, "db/nav_fy_2026_27.db", "db/nav_fy_2026_27.db.bak1"),
+                call(config, "db/nav_fy_2026_27.db.tmp", "db/nav_fy_2026_27.db"),
             ]
         )
-        delete.assert_called_once_with(config, "db/nav.db.tmp")
+        delete.assert_called_once_with(config, "db/nav_fy_2026_27.db.tmp")
 
     def test_r2_lock_uses_expected_lock_key(self) -> None:
         config = R2Config(

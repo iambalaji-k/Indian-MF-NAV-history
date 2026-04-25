@@ -55,7 +55,7 @@ class FetchAndUpdateTests(unittest.TestCase):
 
             self.assertEqual(rows, [])
             self.assertEqual(invalid, 0)
-            self.assertTrue((tmp_path / "data" / "nav.db").exists())
+            self.assertFalse((tmp_path / "data" / "nav_fy_2026_27.db").exists())
             with (tmp_path / "latest_nav.csv").open(newline="", encoding="utf-8") as handle:
                 self.assertEqual(len(list(csv.reader(handle))), 1)
 
@@ -89,7 +89,7 @@ class FetchAndUpdateTests(unittest.TestCase):
             update_databases(rows, date(2026, 4, 2), data_dir)
             update_databases(rows, date(2026, 4, 2), data_dir)
 
-            with closing(sqlite3.connect(data_dir / "nav.db")) as conn:
+            with closing(sqlite3.connect(data_dir / "nav_fy_2026_27.db")) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM nav_history").fetchone()[0]
                 nav = conn.execute("SELECT nav FROM nav_history").fetchone()[0]
 
@@ -112,7 +112,7 @@ class FetchAndUpdateTests(unittest.TestCase):
             update_databases(first_rows, date(2026, 4, 2), data_dir)
             update_databases(second_rows, date(2026, 4, 3), data_dir)
 
-            with closing(sqlite3.connect(data_dir / "nav.db")) as conn:
+            with closing(sqlite3.connect(data_dir / "nav_fy_2026_27.db")) as conn:
                 scheme_count = conn.execute("SELECT COUNT(*) FROM schemes").fetchone()[0]
                 scheme_name = conn.execute(
                     "SELECT scheme_name FROM schemes WHERE scheme_code = 100001"
@@ -130,7 +130,7 @@ class FetchAndUpdateTests(unittest.TestCase):
             update_databases(old_rows, date(2026, 4, 1), data_dir)
             update_databases(new_rows, date(2026, 5, 5), data_dir)
 
-            with closing(sqlite3.connect(data_dir / "nav.db")) as conn:
+            with closing(sqlite3.connect(data_dir / "nav_fy_2026_27.db")) as conn:
                 old_active = conn.execute(
                     "SELECT is_active FROM schemes WHERE scheme_code = 100001"
                 ).fetchone()[0]
@@ -148,7 +148,7 @@ class FetchAndUpdateTests(unittest.TestCase):
 
             update_databases(rows, date(2027, 4, 2), data_dir)
 
-            self.assertTrue((data_dir / "nav.db").exists())
+            self.assertFalse((data_dir / "nav.db").exists())
             self.assertTrue((data_dir / "nav_fy_2026_27.db").exists())
             self.assertFalse((data_dir / "nav_fy_2027_28.db").exists())
 
@@ -166,7 +166,7 @@ class FetchAndUpdateTests(unittest.TestCase):
 
             update_databases(rows, date(2026, 4, 2), data_dir)
 
-            with closing(sqlite3.connect(data_dir / "nav.db")) as conn:
+            with closing(sqlite3.connect(data_dir / "nav_fy_2026_27.db")) as conn:
                 schemes = conn.execute("SELECT scheme_code FROM schemes ORDER BY scheme_code").fetchall()
 
             self.assertEqual(invalid, 0)
@@ -180,7 +180,7 @@ class FetchAndUpdateTests(unittest.TestCase):
 
             update_databases(rows, date(2026, 4, 2), data_dir)
 
-            with closing(sqlite3.connect(data_dir / "nav.db")) as conn:
+            with closing(sqlite3.connect(data_dir / "nav_fy_2026_27.db")) as conn:
                 index_names = {
                     row[0]
                     for row in conn.execute(
@@ -266,7 +266,7 @@ class FetchAndUpdateTests(unittest.TestCase):
             rows, _ = parse_nav_text(sample_line(100001, "Scheme Dimension Fund", "10.00", "01-Apr-2026"))
 
             update_databases(rows, date(2026, 4, 2), data_dir)
-            write_schemes_csv(data_dir / "nav.db", schemes_csv)
+            write_schemes_csv(data_dir / "nav_fy_2026_27.db", schemes_csv)
 
             with schemes_csv.open(newline="", encoding="utf-8") as handle:
                 csv_rows = list(csv.reader(handle))
@@ -289,7 +289,7 @@ class FetchAndUpdateTests(unittest.TestCase):
     def test_existing_real_nav_column_is_migrated_to_text(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:
             data_dir = Path(tmp) / "data"
-            db_path = data_dir / "nav.db"
+            db_path = data_dir / "nav_fy_2026_27.db"
             db_path.parent.mkdir(parents=True)
             with closing(sqlite3.connect(db_path)) as conn:
                 conn.executescript(
@@ -326,7 +326,8 @@ class FetchAndUpdateTests(unittest.TestCase):
                 )
                 conn.commit()
 
-            update_databases([], date(2026, 4, 2), data_dir)
+            rows, _ = parse_nav_text(sample_line())
+            update_databases(rows, date(2026, 4, 2), data_dir)
 
             with closing(sqlite3.connect(db_path)) as conn:
                 nav_type = next(
@@ -342,7 +343,7 @@ class FetchAndUpdateTests(unittest.TestCase):
     def test_r2_upload_validates_database_before_upload(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:
             data_dir = Path(tmp) / "data"
-            db_path = data_dir / "nav.db"
+            db_path = data_dir / "nav_fy_2026_27.db"
             db_path.parent.mkdir(parents=True)
             with closing(sqlite3.connect(db_path)) as conn:
                 conn.execute("CREATE TABLE placeholder (id INTEGER)")

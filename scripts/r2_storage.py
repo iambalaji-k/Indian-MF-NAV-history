@@ -273,11 +273,11 @@ def verify_object_exists(config: R2Config, key: str) -> None:
         raise RuntimeError(f"R2 verification failed; object does not exist: {key}")
 
 
-def rotate_master_backups(config: R2Config, master_key: str) -> None:
-    backup_1 = f"{master_key}.bak1"
-    backup_2 = f"{master_key}.bak2"
+def rotate_r2_backups(config: R2Config, key: str) -> None:
+    backup_1 = f"{key}.bak1"
+    backup_2 = f"{key}.bak2"
     copy_object(config, backup_1, backup_2)
-    copy_object(config, master_key, backup_1)
+    copy_object(config, key, backup_1)
 
 
 def file_sha256(path: Path) -> str:
@@ -294,8 +294,8 @@ def atomic_upload_object(config: R2Config, key: str, source: Path, rotate_backup
     temp_key = f"{key}.tmp"
     upload_object(config, temp_key, source)
     verify_object_exists(config, temp_key)
-    if rotate_backups and key == "db/nav.db":
-        rotate_master_backups(config, key)
+    if rotate_backups and key.endswith(".db"):
+        rotate_r2_backups(config, key)
     copy_object(config, temp_key, key)
     verify_object_exists(config, key)
     delete_object(config, temp_key)

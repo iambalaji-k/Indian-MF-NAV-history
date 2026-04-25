@@ -10,9 +10,8 @@ You can view the latest NAV of all Indian Mutual Funds at: [Indian MF NAV Histor
 
 ## What This Builds
 
-- Combined SQLite archive in R2: `db/nav.db`
-- Two rolling master DB backups in R2: `db/nav.db.bak1` and `db/nav.db.bak2`
 - Financial-year SQLite archives in R2: `db/nav_fy_YYYY_YY.db`
+- Two rolling backups for each financial-year DB in R2: `db/nav_fy_YYYY_YY.db.bak1` and `db/nav_fy_YYYY_YY.db.bak2`
 - Daily run NAV CSV exports in Git: `data/YYYY/MM/nav_YYYY-MM-DD.csv`
 - Scheme metadata dimension CSV in Git: `data/schemes.csv`
 - Latest NAV snapshot in Git: `latest_nav.csv`
@@ -134,8 +133,7 @@ The schema creates indexes for the main access paths:
 
 The archive writes each row to two outputs:
 
-1. Combined SQLite DB, uploaded to R2 as `db/nav.db`
-2. Matching financial-year SQLite DB, uploaded to R2 as `db/nav_fy_YYYY_YY.db`
+1. Matching financial-year SQLite DB, uploaded to R2 as `db/nav_fy_YYYY_YY.db`
 
 Each daily run also generates a separate CSV export:
 
@@ -174,20 +172,18 @@ The updater uses Cloudflare R2's S3-compatible API directly with Python standard
 Objects are stored under the optional prefix:
 
 ```text
-<R2_PREFIX>/db/nav.db
-<R2_PREFIX>/db/nav.db.bak1
-<R2_PREFIX>/db/nav.db.bak2
 <R2_PREFIX>/db/nav_fy_2026_27.db
+<R2_PREFIX>/db/nav_fy_2026_27.db.bak1
+<R2_PREFIX>/db/nav_fy_2026_27.db.bak2
 <R2_PREFIX>/lock/nav.lock
 ```
 
 If `R2_PREFIX` is blank, objects are stored as:
 
 ```text
-db/nav.db
-db/nav.db.bak1
-db/nav.db.bak2
 db/nav_fy_2026_27.db
+db/nav_fy_2026_27.db.bak1
+db/nav_fy_2026_27.db.bak2
 lock/nav.lock
 ```
 
@@ -225,21 +221,20 @@ With `--r2-sync`, the updater:
 
 1. Loads `.env` if present
 2. Acquires the R2 lock at `lock/nav.lock`
-3. Downloads the relevant SQLite DBs from R2
+3. Downloads the relevant yearly SQLite DBs from R2
 4. Records the SHA-256 hash of the current databases
 5. Applies the latest AMFI rows using batched SQLite writes
 6. Generates a daily run CSV at `data/YYYY/MM/nav_YYYY-MM-DD.csv`
-7. Rewrites `data/schemes.csv` from the combined DB
+7. Rewrites `data/schemes.csv` from the relevant yearly DB
 8. Exports `latest_nav.csv`
 9. Validates each SQLite DB if it has changed
 10. Uploads each modified DB through a temp object and promotes it after verification
-11. Rotates `db/nav.db.bak1` and `db/nav.db.bak2` ONLY if the master database changed
+11. Rotates backups for each changed DB (e.g., `db/nav_fy_YYYY_YY.db.bak1`)
 12. Releases the R2 lock
 
 Local outputs:
 
 ```text
-data/nav.db
 data/nav_fy_YYYY_YY.db
 data/YYYY/MM/nav_YYYY-MM-DD.csv
 data/schemes.csv
@@ -281,7 +276,7 @@ The updater does the following:
 14. Inserts NAV facts in batches with `INSERT OR IGNORE`
 15. Marks schemes inactive if not seen for more than 30 days
 16. Writes the results of the daily run to `data/YYYY/MM/nav_YYYY-MM-DD.csv`
-17. Rewrites `data/schemes.csv` from the combined database
+17. Rewrites `data/schemes.csv` from the relevant yearly databases
 18. Exports `latest_nav.csv`
 19. Validates changed SQLite databases before upload
 20. Uploads changed SQLite databases atomically to R2 when `--r2-sync` is enabled
@@ -328,13 +323,13 @@ The R2 sync path is designed to avoid partial or redundant updates:
 
 - Concurrency lock: `lock/nav.lock`
 - Hash-based upload: only modified databases are uploaded to R2
-- Temp upload object: `db/nav.db.tmp` or `db/nav_fy_YYYY_YY.db.tmp`
+- Temp upload object: `db/nav_fy_YYYY_YY.db.tmp`
 - Verification: temp object must exist before promotion
 - Promotion: temp object is copied over the final DB key
 - Cleanup: temp object is deleted after final verification
-- Master backups: before replacing `db/nav.db`, the updater rotates backups ONLY if the content has changed:
-  - `db/nav.db.bak1` to `db/nav.db.bak2`
-  - `db/nav.db` to `db/nav.db.bak1`
+- Rolling backups: before replacing a yearly DB, the updater rotates backups ONLY if the content has changed:
+  - `db/nav_fy_YYYY_YY.db.bak1` to `db/nav_fy_YYYY_YY.db.bak2`
+  - `db/nav_fy_YYYY_YY.db` to `db/nav_fy_YYYY_YY.db.bak1`
 
 SQLite validation runs before any DB upload. If validation fails, upload is blocked.
 
@@ -387,12 +382,12 @@ latest_nav.csv
 
 ## Query Examples
 
-For local querying, first run the updater with `--r2-sync` so the current R2 database is downloaded.
+For local querying, first run the updater with `--r2-sync` so the current R2 databases are downloaded.
 
-Open the combined database:
+Open a specific financial year database:
 
 ```powershell
-sqlite3 data\nav.db
+sqlite3 data\nav_fy_2026_27.db
 ```
 
 Latest NAV date in the archive:
@@ -456,7 +451,7 @@ The test suite covers:
 - R2 environment and object-key behavior
 - R2 retry behavior
 - R2 lock object behavior
-- Atomic upload and master backup rotation (only on change)
+- Atomic upload and yearly backup rotation (only on change)
 - Validation-before-upload
 - Decimal NAV quantization and REAL-to-TEXT migration
 - Validator success and failure cases

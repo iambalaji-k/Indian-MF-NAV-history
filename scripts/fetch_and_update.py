@@ -36,7 +36,6 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT_DIR / "data"
 LOG_DIR = ROOT_DIR / "logs"
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
-COMBINED_DB = DATA_DIR / "nav.db"
 LATEST_CSV = ROOT_DIR / "latest_nav.csv"
 SCHEMES_CSV = DATA_DIR / "schemes.csv"
 NAV_QUANT = Decimal("0.0001")
@@ -353,7 +352,7 @@ def write_daily_run_csv(data_dir: Path, rows: list[NavRow], seen_on: date) -> Pa
 
 
 def db_paths_for_rows(rows: list[NavRow], data_dir: Path = DATA_DIR) -> set[Path]:
-    db_paths = {data_dir / "nav.db"}
+    db_paths: set[Path] = set()
     for row in rows:
         db_paths.add(fy_db_path(row.nav_date, data_dir))
     return db_paths
@@ -404,15 +403,6 @@ def write_schemes_csv(db_path: Path, csv_path: Path = SCHEMES_CSV) -> None:
 
 
 def update_databases(rows: list[NavRow], seen_on: date, data_dir: Path = DATA_DIR) -> set[Path]:
-    combined_db = data_dir / "nav.db"
-    combined_inserted, combined_active = upsert_rows(combined_db, rows, seen_on)
-    logging.info(
-        "Updated %s: inserted %s NAV rows, %s active schemes",
-        combined_db,
-        combined_inserted,
-        combined_active,
-    )
-
     rows_by_db: dict[Path, list[NavRow]] = {}
     for row in rows:
         rows_by_db.setdefault(fy_db_path(row.nav_date, data_dir), []).append(row)
@@ -464,13 +454,25 @@ def main(argv: list[str] | None = None) -> int:
                 db_hashes = {path: file_sha256(path) for path in db_paths}
                 update_databases(rows, seen_on, args.data_dir)
                 write_daily_run_csv(args.data_dir, rows, seen_on)
-                write_schemes_csv(args.data_dir / "nav.db", args.schemes_csv)
+                
+                schemes_source_db = fy_db_path(seen_on, args.data_dir)
+                if not schemes_source_db.exists() and db_paths:
+                    schemes_source_db = sorted(db_paths)[0]
+                if schemes_source_db.exists():
+                    write_schemes_csv(schemes_source_db, args.schemes_csv)
+                
                 write_latest_csv(args.latest_csv, rows)
                 sync_up_databases_to_r2(db_hashes, args.data_dir, r2_config)
         else:
             update_databases(rows, seen_on, args.data_dir)
             write_daily_run_csv(args.data_dir, rows, seen_on)
-            write_schemes_csv(args.data_dir / "nav.db", args.schemes_csv)
+            
+            schemes_source_db = fy_db_path(seen_on, args.data_dir)
+            if not schemes_source_db.exists() and db_paths:
+                schemes_source_db = sorted(db_paths)[0]
+            if schemes_source_db.exists():
+                write_schemes_csv(schemes_source_db, args.schemes_csv)
+                
             write_latest_csv(args.latest_csv, rows)
     except Exception:
         logging.exception("NAV update failed")

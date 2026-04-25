@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_DB = ROOT_DIR / "data" / "nav.db"
+DATA_DIR = ROOT_DIR / "data"
 
 
 def validate_database(db_path: Path, gap_days: int = 45, jump_threshold: float = 0.50) -> int:
@@ -105,7 +105,7 @@ def validate_database(db_path: Path, gap_days: int = 45, jump_threshold: float =
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Validate the AMFI NAV SQLite archive.")
-    parser.add_argument("--db", type=Path, default=DEFAULT_DB)
+    parser.add_argument("--db", type=Path, help="Specific database to validate. If omitted, all .db files in data/ are validated.")
     parser.add_argument("--gap-days", type=int, default=45)
     parser.add_argument("--jump-threshold", type=float, default=0.50)
     return parser
@@ -114,7 +114,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = build_arg_parser().parse_args(argv)
-    return validate_database(args.db, args.gap_days, args.jump_threshold)
+    
+    if args.db:
+        return validate_database(args.db, args.gap_days, args.jump_threshold)
+    
+    db_files = list(DATA_DIR.glob("*.db"))
+    if not db_files:
+        logging.info("No databases found in %s", DATA_DIR)
+        return 0
+    
+    exit_code = 0
+    for db_path in sorted(db_files):
+        if validate_database(db_path, args.gap_days, args.jump_threshold) != 0:
+            exit_code = 1
+            
+    return exit_code
 
 
 if __name__ == "__main__":
