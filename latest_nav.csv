@@ -92,8 +92,8 @@ scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,nav,nav_date
 100388,INF204K01CM9,-,Nippon India Medium to Long Duration  Fund - Growth Plan Bonus Option,26.0477,2026-05-22
 100414,INF277K01303,-,Tata Aggressive Hybrid Fund- Regular Plan - Growth Option,424.6222,2026-05-22
 100415,INF277K01956,-,Tata Ethical Fund-Regular Plan - Growth Option,359.7066,2026-05-22
-100470,INF090I01155,INF090I01163,Franklin India Large Cap Fund - IDCW,40.9121,2026-05-21
-100471,INF090I01171,-,Franklin India Large Cap Fund-Growth,974.3020,2026-05-21
+100470,INF090I01155,INF090I01163,Franklin India Large Cap Fund - IDCW,41.1013,2026-05-22
+100471,INF090I01171,-,Franklin India Large Cap Fund-Growth,978.8076,2026-05-22
 100472,INF090I01726,INF090I01734,Franklin India Mid Cap Fund - IDCW,91.0566,2026-05-22
 100473,INF090I01809,-,Franklin India Mid Cap Fund-Growth,2682.0133,2026-05-22
 100474,INF277K01I60,-,Tata ELSS Fund- Regular Plan - Payout of IDCW Option,91.9035,2026-05-22
@@ -108,9 +108,9 @@ scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,nav,nav_date
 100497,INF090I01270,INF090I01288,Templeton India Value Fund - IDCW,90.4836,2026-05-22
 100519,INF090I01213,INF090I01221,Franklin India Flexi Cap Fund - IDCW,59.8633,2026-05-22
 100520,INF090I01239,-,Franklin India Flexi Cap Fund - Growth,1547.1419,2026-05-22
-100521,INF090I01759,INF090I01767,Franklin India Technology Fund - IDCW,38.6741,2026-05-21
-100522,INF090I01742,-,Franklin India Technology Fund-Growth,448.7420,2026-05-21
-100524,INF090I01858,INF090I01866,Franklin INDIA OPPORTUNITIES FUND - IDCW,35.1139,2026-05-21
+100521,INF090I01759,INF090I01767,Franklin India Technology Fund - IDCW,38.5720,2026-05-22
+100522,INF090I01742,-,Franklin India Technology Fund-Growth,447.5570,2026-05-22
+100524,INF090I01858,INF090I01866,Franklin INDIA OPPORTUNITIES FUND - IDCW,35.2509,2026-05-22
 100525,INF090I01783,INF090I01791,Franklin India ELSS Tax Saver Fund - IDCW,58.1724,2026-05-22
 100526,INF090I01775,-,Franklin India ELSS Tax Saver Fund-Growth,1376.6768,2026-05-22
 100527,INF090I01DH4,INF090I01DI2,Franklin India Corporate Debt Fund - Plan A - Annual - IDCW,16.6391,2026-05-22
@@ -288,8 +288,8 @@ scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,nav,nav_date
 101619,INF109K01746,-,ICICI Prudential Savings Fund - Growth,571.8278,2026-05-22
 101635,INF740K01243,-,DSP Large Cap Fund - Regular Plan - Growth,451.2760,2026-05-22
 101636,INF740K01227,INF740K01235,DSP Large Cap Fund - Regular Plan - IDCW,23.0090,2026-05-22
-101656,INF090I01262,-,Franklin India Dynamic Asset Allocation Active Fund of Funds-Growth,161.9251,2026-05-21
-101657,INF090I01247,INF090I01254,Franklin India Dynamic Asset Allocation Active Fund of funds - IDCW,39.8781,2026-05-21
+101656,INF090I01262,-,Franklin India Dynamic Asset Allocation Active Fund of Funds-Growth,162.2830,2026-05-22
+101657,INF090I01247,INF090I01254,Franklin India Dynamic Asset Allocation Active Fund of funds - IDCW,39.9662,2026-05-22
 101659,INF277K01741,-,Tata Nifty 50 Index Fund -Regular Plan,147.5464,2026-05-22
 101665,INF204K01FL4,-,Nippon India Short Duration  Fund-Growth Plan,54.8116,2026-05-22
 101667,INF204K01FM2,INF204K01FN0,NIPPON INDIA SHORT DURATION FUND - MONTHLY IDCW Option,11.4636,2026-05-22
@@ -523,7 +523,7 @@ scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,nav,nav_date
 103146,INF200K01313,INF200K01321,SBI Comma Fund - Regular Plan - Income Distribution cum Capital Withdrawal Option (IDCW),66.5536,2026-05-22
 103149,INF109K01AV5,-,ICICI Prudential Infrastructure Fund - Growth,197.8200,2026-05-22
 103150,INF109K01FB6,INF109K01AT9,ICICI Prudential Infrastructure Fund - IDCW,27.8500,2026-05-22
-103151,INF090I01841,-,Franklin India Opportunities Fund - Growth,244.7965,2026-05-21
+103151,INF090I01841,-,Franklin India Opportunities Fund - Growth,245.7522,2026-05-22
 103154,INF209K01BS7,INF209K01EE1,Aditya Birla Sun Life Equity Hybrid'95 Fund -Regular - IDCW,165.1900,2026-05-22
 103155,INF209K01BT5,-,Aditya Birla Sun Life Equity Hybrid'95 Fund - Regular Plan-Growth,1480.9200,2026-05-22
 103158,INF277K01MD3,INF277K01MB7,Tata Treasury Advantage Fund Regular Plan - Weekly Payout of IDCW Option,1006.3998,2026-05-22
@@ -582,8 +582,8 @@ scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,nav,nav_date
 103633,INF109K01TX1,-,ICICI Prudential Money Market Fund Option - Growth,399.1865,2026-05-22
 103634,INF109K01TY9,-,ICICI Prudential Money Market Fund Option - Daily IDCW,99.9485,2026-05-22
 103635,INF109K01TZ6,-,ICICI Prudential Money Market Fund Option - Weekly IDCW,100.5176,2026-05-22
-103678,INF090I01957,-,Franklin India Dividend Yield Fund-Growth Plan,136.1089,2026-05-21
-103679,INF090I01932,INF090I01940,Franklin India Dividend Yield Fund - IDCW,23.6196,2026-05-21
+103678,INF090I01957,-,Franklin India Dividend Yield Fund-Growth Plan,136.3533,2026-05-22
+103679,INF090I01932,INF090I01940,Franklin India Dividend Yield Fund - IDCW,23.6620,2026-05-22
 103734,INF082J01127,-,Quantum Liquid Fund - Direct Plan Growth Option,37.0383,2026-05-24
 103735,INF082J01143,INF082J01200,Quantum Liquid Fund - Direct Plan Monthly IDCW,10.0512,2026-05-24
 103736,-,INF082J01135,Quantum Liquid Fund - Direct Plan Daily IDCW,10.0085,2026-05-24
@@ -761,8 +761,8 @@ scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,nav,nav_date
 106872,INF209K01512,INF209K01CV9,Aditya Birla Sun Life International Equity Fund - Regular - IDCW,22.3878,2026-05-22
 106873,INF209K01520,-,Aditya Birla Sun Life International Equity Fund - Growth - Regular Plan,52.5357,2026-05-22
 106929,INF373I01023,-,Kotak Nifty PSU Bank ETF,802.6699,2026-05-22
-106978,INF090I01999,INF090I01AA5,Franklin Asian Equity Fund - IDCW,20.5716,2026-05-21
-106979,INF090I01AB3,-,Franklin Asian Equity Fund - Growth Plan,43.5821,2026-05-21
+106978,INF090I01999,INF090I01AA5,Franklin Asian Equity Fund - IDCW,20.6810,2026-05-22
+106979,INF090I01AB3,-,Franklin Asian Equity Fund - Growth Plan,43.8139,2026-05-22
 106980,INF789FC1GD5,INF789FA1R58,UTI Short Duration Fund - Regular Plan - Quarterly IDCW,17.0176,2026-05-22
 107287,INF192K01643,-,JM ELSS Tax Saver Fund (Regular) - IDCW,47.4970,2026-05-22
 107288,INF192K01650,-,JM ELSS Tax Saver Fund (Regular) - Growth option,47.4977,2026-05-22
@@ -1221,8 +1221,8 @@ scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,nav,nav_date
 116548,INF666M01188,INF666M01170,Groww Largecap Fund (formerly known as Indiabulls Bluechip Fund)- Regular Plan- - Income Distribution cum capital withdrawal Option (Payout & Reinvestment),23.3900,2026-05-22
 116555,INF582M01336,-,Union Dynamic Bond Fund - Growth Option,22.9035,2026-05-22
 116556,INF582M01351,INF582M01344,Union Dynamic Bond Fund - IDCW Option,15.2698,2026-05-22
-116632,INF090I01EV3,INF090I01EU5,Franklin U.S. Opportunities Equity Active Fund of Funds - IDCW,91.4806,2026-05-21
-116633,INF090I01EW1,-,Franklin U.S. Opportunities Equity Active Fund of Funds - Growth,91.4806,2026-05-21
+116632,INF090I01EV3,INF090I01EU5,Franklin U.S. Opportunities Equity Active Fund of Funds - IDCW,91.3888,2026-05-22
+116633,INF090I01EW1,-,Franklin U.S. Opportunities Equity Active Fund of Funds - Growth,91.3888,2026-05-22
 116653,INF205K01SB5,INF205K01SC3,Invesco India Money Market Fund - Discretionary IDCW (Payout / Reinvestment),3202.5441,2026-05-22
 116795,INF209K01PG2,INF209K01PH0,Aditya Birla Sun Life Gold Fund-REGULAR - IDCW,45.6444,2026-05-22
 116796,INF209K01PF4,-,Aditya Birla Sun Life Gold Fund-Growth,45.6467,2026-05-22
@@ -1350,7 +1350,7 @@ scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,nav,nav_date
 118422,INF194K01W39,INF194K01W47,Bandhan Focused Fund - Direct Plan - IDCW,33.0520,2026-05-22
 118423,INF194K01W70,INF194K01W88,BANDHAN Flexi Cap Fund-Direct Plan-IDCW,50.0210,2026-05-22
 118424,INF194K01W62,-,BANDHAN Flexi Cap Fund-Direct Plan-Growth,224.3130,2026-05-22
-118462,INF090I01FO5,INF090I01FP2,Franklin India Large Cap Fund - Direct - IDCW,47.7192,2026-05-21
+118462,INF090I01FO5,INF090I01FP2,Franklin India Large Cap Fund - Direct - IDCW,47.9408,2026-05-22
 118463,INF194K01R36,INF194K01R28,Bandhan Gilt Fund - Direct Plan - IDCW,15.1639,2026-05-22
 118464,INF194K01Q29,-,Bandhan Gilt Fund - Direct Plan - Growth,39.3288,2026-05-22
 118465,INF194K01Q45,INF194K01Q37,Bandhan Gilt Fund - Direct Plan - Half Yearly IDCW,12.2382,2026-05-22
@@ -1391,31 +1391,31 @@ scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,nav,nav_date
 118510,INF090I01IN1,-,Franklin India Large & Mid Cap Fund - Direct - Growth,202.1416,2026-05-22
 118524,INF090I01IO9,INF090I01IP6,Franklin India Small Cap Fund - Direct - IDCW,49.9675,2026-05-22
 118525,INF090I01IQ4,-,Franklin India Small Cap Fund - Direct - Growth,192.2596,2026-05-22
-118526,INF090I01IR2,INF090I01IS0,Franklin India Dividend Yield Fund - Direct - IDCW,26.8561,2026-05-21
-118527,INF090I01IT8,-,Franklin India Dividend Yield Fund - Direct - Growth,150.0036,2026-05-21
-118531,INF090I01FN7,-,Franklin India Large Cap Fund- Direct - Growth,1085.2571,2026-05-21
+118526,INF090I01IR2,INF090I01IS0,Franklin India Dividend Yield Fund - Direct - IDCW,26.9049,2026-05-22
+118527,INF090I01IT8,-,Franklin India Dividend Yield Fund - Direct - Growth,150.2762,2026-05-22
+118531,INF090I01FN7,-,Franklin India Large Cap Fund- Direct - Growth,1090.2967,2026-05-22
 118532,INF090I01FI7,INF090I01FJ5,Franklin India Mid Cap Fund - Direct - IDCW,110.2348,2026-05-22
 118533,INF090I01FH9,-,Franklin India Mid Cap Fund - Direct - Growth,3034.9018,2026-05-22
 118534,INF090I01FL1,INF090I01FM9,Franklin India Flexi Cap Fund - Direct - IDCW,67.0427,2026-05-22
 118535,INF090I01FK3,-,Franklin India Flexi Cap Fund - Direct - Growth,1733.8721,2026-05-22
-118536,INF090I01FF3,INF090I01FG1,Franklin India Technology Fund - Direct - IDCW,43.4264,2026-05-21
-118537,INF090I01FE6,-,Franklin India Technology Fund - Direct - Growth,498.3270,2026-05-21
-118538,INF090I01GD6,INF090I01GE4,Franklin INDIA OPPORTUNITIES FUND - Direct - IDCW,39.7873,2026-05-21
-118539,INF090I01GC8,-,Franklin India Opportunities Fund - Direct - Growth,272.8259,2026-05-21
+118536,INF090I01FF3,INF090I01FG1,Franklin India Technology Fund - Direct - IDCW,43.3129,2026-05-22
+118537,INF090I01FE6,-,Franklin India Technology Fund - Direct - Growth,497.0244,2026-05-22
+118538,INF090I01GD6,INF090I01GE4,Franklin INDIA OPPORTUNITIES FUND - Direct - IDCW,39.9439,2026-05-22
+118539,INF090I01GC8,-,Franklin India Opportunities Fund - Direct - Growth,273.8999,2026-05-22
 118540,INF090I01JS8,-,Franklin India ELSS Tax Saver Fund - Direct - Growth,1544.9286,2026-05-22
 118541,INF090I01JT6,INF090I01JU4,Franklin India ELSS Tax Saver Fund - Direct - IDCW,67.6505,2026-05-22
-118542,INF090I01HT0,INF090I01HU8,Franklin India Dynamic Asset Allocation Active Fund of funds - Direct - IDCW,47.3716,2026-05-21
-118543,INF090I01HV6,-,Franklin India Dynamic Asset Allocation Active Fund Of Funds - Direct - Growth,184.4349,2026-05-21
+118542,INF090I01HT0,INF090I01HU8,Franklin India Dynamic Asset Allocation Active Fund of funds - Direct - IDCW,47.4774,2026-05-22
+118543,INF090I01HV6,-,Franklin India Dynamic Asset Allocation Active Fund Of Funds - Direct - Growth,184.8468,2026-05-22
 118546,INF090I01FZ1,-,Franklin India Aggressive Hybrid Fund - Direct - Growth,299.8427,2026-05-22
 118547,INF090I01GA2,INF090I01GB0,Franklin India Aggressive Hybrid Fund - Direct - IDCW,33.4144,2026-05-22
 118548,INF090I01JZ3,-,Franklin India Retirement Fund - Direct - Growth,235.9495,2026-05-22
 118549,INF090I01KA4,INF090I01KB2,Franklin India Retirement Fund - Direct - IDCW,17.9484,2026-05-22
-118550,INF090I01JP4,INF090I01JQ2,Franklin U.S. Opportunities Equity Active Fund of Funds - Direct - IDCW,104.1779,2026-05-21
-118551,INF090I01JR0,-,Franklin U.S. Opportunities Equity Active Fund of Funds - Direct - Growth,104.1779,2026-05-21
+118550,INF090I01JP4,INF090I01JQ2,Franklin U.S. Opportunities Equity Active Fund of Funds - Direct - IDCW,104.0761,2026-05-22
+118551,INF090I01JR0,-,Franklin U.S. Opportunities Equity Active Fund of Funds - Direct - Growth,104.0761,2026-05-22
 118556,INF090I01JD0,INF090I01JE8,Franklin Build India Fund - Direct - IDCW,50.1051,2026-05-22
 118557,INF090I01JF5,-,Franklin Build India Fund - Direct - Growth,167.6145,2026-05-22
-118558,INF090I01IX0,INF090I01IY8,Franklin Asian Equity Fund - Direct - IDCW,21.9753,2026-05-21
-118559,INF090I01IZ5,-,Franklin Asian Equity Fund - Direct - Growth,47.9932,2026-05-21
+118558,INF090I01IX0,INF090I01IY8,Franklin Asian Equity Fund - Direct - IDCW,22.0927,2026-05-22
+118559,INF090I01IZ5,-,Franklin Asian Equity Fund - Direct - Growth,48.2497,2026-05-22
 118563,INF090I01IU6,INF090I01IV4,Franklin India Focused Equity Fund - Direct - IDCW,39.3964,2026-05-22
 118564,INF090I01IW2,-,Franklin India Focused Equity Fund - Direct - Growth,113.0085,2026-05-22
 118569,INF090I01FW8,-,Franklin India Corporate Debt Fund - Direct - GROWTH,113.4248,2026-05-22
@@ -2773,10 +2773,10 @@ scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,nav,nav_date
 132873,INF204KA1WV6,-,NIPPON INDIA CREDIT RISK FUND - DIRECT Plan - IDCW Option,22.1972,2026-05-22
 132917,INF209KA1TV7,-,Aditya Birla Sun Life Dynamic Bond Fund -Regular - IDCW,11.8488,2026-05-22
 132918,INF209KA1TX3,-,Aditya Birla Sun Life Dynamic Bond Fund -Direct - IDCW,12.8931,2026-05-22
-132987,INF090I01LE4,-,Franklin India Income Plus Arbitrage Active Fund of Funds- Growth Plan,21.9458,2026-05-21
-132988,INF090I01LF1,INF090I01LG9,Franklin India Income Plus Arbitrage Active Fund of Funds- IDCW,21.9458,2026-05-21
-132989,INF090I01LH7,-,Franklin India Income Plus Arbitrage Active Fund of Funds- Growth Plan - Direct,24.8196,2026-05-21
-132990,INF090I01LI5,INF090I01LJ3,Franklin India Income Plus Arbitrage Active Fund of Funds - Direct - IDCW,24.8196,2026-05-21
+132987,INF090I01LE4,-,Franklin India Income Plus Arbitrage Active Fund of Funds- Growth Plan,21.9419,2026-05-22
+132988,INF090I01LF1,INF090I01LG9,Franklin India Income Plus Arbitrage Active Fund of Funds- IDCW,21.9419,2026-05-22
+132989,INF090I01LH7,-,Franklin India Income Plus Arbitrage Active Fund of Funds- Growth Plan - Direct,24.8154,2026-05-22
+132990,INF090I01LI5,INF090I01LJ3,Franklin India Income Plus Arbitrage Active Fund of Funds - Direct - IDCW,24.8154,2026-05-22
 132995,INF209KA1TP9,-,Aditya Birla Sun Life Equity Savings Fund - Direct Plan - Growth,25.4100,2026-05-22
 132996,INF209KA1TQ7,INF209KA1TR5,Aditya Birla Sun Life Equity Savings Fund - Direct - IDCW,15.4400,2026-05-22
 132997,INF209KA1TT1,INF209KA1TU9,Aditya Birla Sun Life Equity Savings Fund - Regular - IDCW,13.0700,2026-05-22
@@ -4247,10 +4247,10 @@ scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,nav,nav_date
 147624,INF247L01924,-,Motilal Oswal Nifty Smallcap 250 Index - Regular Plan,35.8254,2026-05-22
 147625,INF247L01957,-,Motilal Oswal Nifty 500 Index Fund - Direct Plan,26.3580,2026-05-22
 147626,INF247L01940,-,Motilal Oswal Nifty 500 Index Fund - Regular Plan,25.1899,2026-05-22
-147645,INF109KC1F42,-,ICICI Prudential Global Advantage Fund (FOF) - Direct Plan - IDCW,22.8749,2026-05-21
-147646,INF109KC1F18,-,ICICI Prudential Global Advantage Fund (FOF) - IDCW,21.8653,2026-05-21
-147647,INF109KC1F00,-,ICICI Prudential Global Advantage Fund (FOF) - Growth Option,21.8660,2026-05-21
-147648,INF109KC1F34,-,ICICI Prudential Global Advantage Fund (FOF) - Direct Plan - Growth Option,22.8749,2026-05-21
+147645,INF109KC1F42,-,ICICI Prudential Global Advantage Fund (FOF) - Direct Plan - IDCW,22.9973,2026-05-22
+147646,INF109KC1F18,-,ICICI Prudential Global Advantage Fund (FOF) - IDCW,21.9819,2026-05-22
+147647,INF109KC1F00,-,ICICI Prudential Global Advantage Fund (FOF) - Growth Option,21.9826,2026-05-22
+147648,INF109KC1F34,-,ICICI Prudential Global Advantage Fund (FOF) - Direct Plan - Growth Option,22.9973,2026-05-22
 147661,INF109KC1F67,-,ICICI Prudential Commodities Fund - Growth Option,47.8800,2026-05-22
 147662,INF109KC1F91,-,ICICI Prudential Commodities Fund - Direct Plan - Growth Option,52.1300,2026-05-22
 147663,INF109KC1F75,-,ICICI Prudential Commodities Fund - IDCW Option,30.7800,2026-05-22
@@ -8308,14 +8308,14 @@ scheme_code,isin_payout_or_growth,isin_reinvestment,scheme_name,nav,nav_date
 153880,INF846KA1218,-,Axis CRISIL-IBX Financial Services 3-6 Months Debt Index Fund - Regular Plan - Growth option,10.4061,2026-05-22
 153881,INF846KA1234,INF846KA1259,Axis CRISIL-IBX Financial Services 3-6 Months Debt Index Fund - Regular Plan - IDCW option,10.4053,2026-05-22
 153882,INF846KA1242,INF846KA1267,Axis CRISIL-IBX Financial Services 3-6 Months Debt Index Fund - Direct Plan - IDCW option,10.4124,2026-05-22
-153883,INF2F0001081,-,THE WEALTH COMPANY LIQUID FUND DIRECT GROWTH,1038.9835,2026-05-23
-153884,INF2F0001107,INF2F0001099,THE WEALTH COMPANY LIQUID FUND DIRECT MONTHLY IDCW,1005.8405,2026-05-23
-153885,INF2F0001180,INF2F0001172,THE WEALTH COMPANY LIQUID FUND REGULAR WEEKLY IDCW,1002.6506,2026-05-23
-153886,-,INF2F0001131,THE WEALTH COMPANY LIQUID FUND REGULAR DAILY IDCW,1002.1709,2026-05-23
-153887,-,INF2F0001073,THE WEALTH COMPANY LIQUID FUND DIRECT DAILY ICDW,1002.1765,2026-05-23
-153888,INF2F0001149,-,THE WEALTH COMPANY LIQUID FUND REGULAR GROWTH,1037.9953,2026-05-23
-153889,INF2F0001123,INF2F0001115,THE WEALTH COMPANY LIQUID FUND DIRECT WEEKLY,1002.6784,2026-05-23
-153890,INF2F0001164,INF2F0001156,THE WEALTH COMPANY LIQUID FUND REGULAR MONTHLY IDCW,1005.6911,2026-05-23
+153883,INF2F0001081,-,THE WEALTH COMPANY LIQUID FUND DIRECT GROWTH,1039.1664,2026-05-24
+153884,INF2F0001107,INF2F0001099,THE WEALTH COMPANY LIQUID FUND DIRECT MONTHLY IDCW,1006.0175,2026-05-24
+153885,INF2F0001180,INF2F0001172,THE WEALTH COMPANY LIQUID FUND REGULAR WEEKLY IDCW,1002.8226,2026-05-24
+153886,-,INF2F0001131,THE WEALTH COMPANY LIQUID FUND REGULAR DAILY IDCW,1002.0000,2026-05-24
+153887,-,INF2F0001073,THE WEALTH COMPANY LIQUID FUND DIRECT DAILY ICDW,1002.0000,2026-05-24
+153888,INF2F0001149,-,THE WEALTH COMPANY LIQUID FUND REGULAR GROWTH,1038.1730,2026-05-24
+153889,INF2F0001123,INF2F0001115,THE WEALTH COMPANY LIQUID FUND DIRECT WEEKLY,1002.8549,2026-05-24
+153890,INF2F0001164,INF2F0001156,THE WEALTH COMPANY LIQUID FUND REGULAR MONTHLY IDCW,1005.8630,2026-05-24
 153891,INF2F0001271,-,THE WEALTH COMPANY ARBITRAGE FUND DIRECT GROWTH,10.3822,2026-05-22
 153892,INF2F0001305,-,THE WEALTH COMPANY ARBITRAGE FUND REGULAR GROWTH,10.3413,2026-05-22
 153893,INF2F0001263,INF2F0001255,THE WEALTH COMPANY ARBITRAGE FUND DIRECT IDCW,10.3813,2026-05-22
