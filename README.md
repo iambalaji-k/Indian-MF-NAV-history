@@ -2,7 +2,7 @@
 
 ## 🔗 Live website
 
-You can view the latest NAV of all Indian Mutual Funds at: [Indian MF NAV History Dashboard](https://balajik.work.gd/Indian-MF-NAV-history/)
+You can view the latest NAV of all Indian Mutual Funds at: [Indian MF NAV History Dashboard](https://balajik.in/Indian-MF-NAV-history/)
 
 > Self-updating historical NAV archive for Indian mutual funds using AMFI's `NAVAll.txt` feed, SQLite, Cloudflare R2, CSV exports, and GitHub Actions.
 > 
