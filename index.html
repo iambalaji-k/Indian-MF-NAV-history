@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en" class="dark scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Indian Mutual Fund NAV Explorer</title>
+    
+    <!-- Google Fonts & Tailwind CSS -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Plus Jakarta Sans', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #090d16;
+            color: #f1f5f9;
+        }
+        .dark-glass {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+        }
+        .autocomplete-dropdown::-webkit-scrollbar {
+            width: 6px;
+        }
+        .autocomplete-dropdown::-webkit-scrollbar-track {
+            background: #0f172a; 
+        }
+        .autocomplete-dropdown::-webkit-scrollbar-thumb {
+            background: #334155; 
+            border-radius: 9999px;
+        }
+        .autocomplete-dropdown::-webkit-scrollbar-thumb:hover {
+            background: #475569; 
+        }
+    </style>
+</head>
+<body class="bg-[#090d16] text-slate-100 font-sans antialiased min-h-screen flex flex-col selection:bg-sky-500 selection:text-white">
+
+    <!-- Header -->
+    <header class="sticky top-0 z-40 dark-glass border-b border-slate-800/80 shadow-md">
+        <div class="w-full px-3 sm:px-8 h-16 flex items-center justify-between gap-2 sm:gap-4">
+            <!-- Brand / Logo -->
+            <a href="#" class="flex items-center gap-2 sm:gap-3 group shrink-0">
+                <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-gradient-to-br from-sky-400 to-blue-600 text-slate-950 flex items-center justify-center font-bold text-xs sm:text-sm shadow-md shadow-sky-500/20 group-hover:scale-105 transition-transform">
+                    <i class="fas fa-chart-line"></i>
+                </div>
+                <div class="flex items-center gap-1.5 sm:gap-2">
+                    <span class="text-sm sm:text-lg font-bold tracking-tight text-white whitespace-nowrap">Indian MF NAV</span>
+                    <span class="px-2 py-0.5 rounded-md bg-slate-800/90 text-slate-300 text-[10px] font-bold tracking-wider uppercase border border-slate-700/80 hidden md:inline-block">Explorer</span>
+                </div>
+            </a>
+
+            <!-- Right Controls: Status + Download Button -->
+            <div class="flex items-center gap-2 sm:gap-3 shrink-0">
+                <div id="last-updated" class="h-8 sm:h-9 px-2.5 sm:px-3 rounded-lg bg-slate-900 border border-slate-800 text-[10px] sm:text-xs font-mono font-medium text-slate-300 flex items-center gap-1.5 whitespace-nowrap">
+                    <span class="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    Loading...
+                </div>
+
+                <a href="#" id="download-btn" download 
+                   class="h-8 sm:h-9 px-3 sm:px-4 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 text-[11px] sm:text-xs font-bold transition-all shadow-sm shadow-sky-500/20 flex items-center gap-1.5 whitespace-nowrap">
+                    <i class="fas fa-download text-[10px] sm:text-xs"></i> Download
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-grow max-w-4xl w-full mx-auto px-3 sm:px-6 py-5 sm:py-8 flex flex-col gap-5 sm:gap-6">
+        
+        <!-- Search Section -->
+        <div class="bg-slate-900/90 rounded-2xl border border-slate-800 p-4 sm:p-6 shadow-xl relative">
+            
+            <!-- Search Bar Header -->
+            <div class="flex items-center justify-between gap-2 mb-2.5">
+                <label for="search-input" class="text-xs sm:text-sm font-semibold text-slate-300">
+                    Search Mutual Funds
+                </label>
+                <span class="text-xs text-slate-500 font-mono hidden sm:inline-block">
+                    <kbd class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400">Ctrl</kbd> + <kbd class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400">K</kbd>
+                </span>
+            </div>
+
+            <!-- Search Input Box -->
+            <div class="relative">
+                <div class="absolute inset-y-0 left-0 pl-3.5 sm:pl-4 flex items-center pointer-events-none text-slate-500 text-sm sm:text-base">
+                    <i class="fas fa-search"></i>
+                </div>
+
+                <input type="text" id="search-input" 
+                    class="w-full pl-10 sm:pl-11 pr-9 py-3 sm:py-3.5 bg-slate-950 border border-slate-800 rounded-xl text-xs sm:text-base text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition-all font-medium"
+                    placeholder="Enter Fund Name, Scheme Code, or ISIN..." autocomplete="off" disabled>
+
+                <button id="clear-search-btn" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 hidden">
+                    <i class="fas fa-times-circle text-base"></i>
+                </button>
+
+                <!-- Dropdown -->
+                <div id="autocomplete-results" 
+                    class="autocomplete-dropdown absolute z-30 left-0 right-0 mt-2 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl max-h-72 sm:max-h-80 overflow-y-auto hidden divide-y divide-slate-800/60">
+                </div>
+            </div>
+
+            <!-- Quick Category Filter Chips -->
+            <div class="mt-3 flex items-center gap-1.5 sm:gap-2 text-xs overflow-x-auto pb-0.5">
+                <span class="text-slate-500 text-[10px] sm:text-[11px] shrink-0">Filters:</span>
+                <button class="filter-chip shrink-0 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md bg-slate-800/80 hover:bg-sky-950 hover:text-sky-400 text-slate-400 font-medium transition-colors border border-slate-800 text-[11px] sm:text-xs" data-filter="Growth">Growth</button>
+                <button class="filter-chip shrink-0 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md bg-slate-800/80 hover:bg-sky-950 hover:text-sky-400 text-slate-400 font-medium transition-colors border border-slate-800 text-[11px] sm:text-xs" data-filter="Direct">Direct</button>
+                <button class="filter-chip shrink-0 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md bg-slate-800/80 hover:bg-sky-950 hover:text-sky-400 text-slate-400 font-medium transition-colors border border-slate-800 text-[11px] sm:text-xs" data-filter="Dividend">Dividend</button>
+                <button class="filter-chip shrink-0 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md bg-slate-800/80 hover:bg-sky-950 hover:text-sky-400 text-slate-400 font-medium transition-colors border border-slate-800 text-[11px] sm:text-xs" data-filter="Regular">Regular</button>
+            </div>
+        </div>
+
+        <!-- Clean, Modern NAV Result Display -->
+        <div id="result-card" class="bg-slate-900 rounded-2xl border border-slate-800 p-4 sm:p-6 shadow-xl hidden space-y-4 sm:space-y-6">
+            
+            <!-- Top Header: Scheme Name & Date -->
+            <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-slate-800/80 pb-5">
+                <div class="space-y-1">
+                    <h2 id="res-name" class="text-lg sm:text-xl font-bold text-white leading-snug"></h2>
+                    <div class="flex items-center gap-2 text-xs text-slate-400 font-mono">
+                        <span>Code: <strong id="res-code" class="text-sky-400"></strong></span>
+                    </div>
+                </div>
+                <div class="self-start">
+                    <span id="res-date" class="px-3 py-1 rounded-md bg-slate-800 text-slate-300 border border-slate-700 text-xs font-mono"></span>
+                </div>
+            </div>
+            
+            <!-- Clean NAV Display Box -->
+            <div class="bg-slate-950 rounded-xl p-5 border border-slate-800/80">
+                <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Net Asset Value</div>
+                <div class="text-3xl sm:text-4xl font-extrabold text-emerald-400 tracking-tight flex items-baseline gap-1 font-mono">
+                    <span class="text-xl text-emerald-500 font-sans">₹</span>
+                    <span id="res-nav"></span>
+                </div>
+            </div>
+
+            <!-- Metadata Details Grid -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div id="res-isin-card" class="bg-slate-950/60 rounded-lg p-3.5 border border-slate-800/60 flex items-center justify-between text-xs">
+                    <div>
+                        <span class="text-slate-500 block text-[11px]">ISIN (Payout / Growth)</span>
+                        <span id="res-isin" class="font-mono text-slate-300 font-medium break-all"></span>
+                    </div>
+                    <button class="copy-btn text-slate-500 hover:text-sky-400 transition-colors p-1" data-copy-target="res-isin" title="Copy ISIN">
+                        <i class="far fa-copy text-sm"></i>
+                    </button>
+                </div>
+
+                <div id="res-isin-reinv-card" class="bg-slate-950/60 rounded-lg p-3.5 border border-slate-800/60 flex items-center justify-between text-xs">
+                    <div>
+                        <span class="text-slate-500 block text-[11px]">ISIN (Reinvestment)</span>
+                        <span id="res-isin-reinv" class="font-mono text-slate-300 font-medium break-all"></span>
+                    </div>
+                    <button class="copy-btn text-slate-500 hover:text-sky-400 transition-colors p-1" data-copy-target="res-isin-reinv" title="Copy ISIN">
+                        <i class="far fa-copy text-sm"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Searches -->
+        <div id="recent-searches-container" class="hidden space-y-2">
+            <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                <span>Recent Searches</span>
+                <button id="clear-recent-btn" class="hover:text-slate-400 transition-colors text-slate-600">Clear</button>
+            </div>
+            <div id="recent-searches-list" class="flex flex-wrap gap-2"></div>
+        </div>
+
+        <!-- Empty State -->
+        <div id="empty-state" class="text-center py-12 px-4 rounded-2xl bg-slate-900/40 border border-slate-800/40">
+            <i class="fas fa-search-dollar text-slate-700 text-3xl mb-2"></i>
+            <p class="text-sm text-slate-400">Search for any Indian mutual fund scheme above</p>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-slate-950 border-t border-slate-900 py-6 text-center mt-auto text-xs text-slate-600">
+        Data sourced automatically from <a href="https://www.amfiindia.com/" target="_blank" class="text-slate-400 hover:underline">AMFI India</a>
+    </footer>
+
+    <!-- Scripts -->
+    <script>
+        let navData = [];
+        let recentSearches = JSON.parse(localStorage.getItem('mf_recent_searches') || '[]');
+        
+        const searchInput = document.getElementById('search-input');
+        const clearSearchBtn = document.getElementById('clear-search-btn');
+        const resultsDropdown = document.getElementById('autocomplete-results');
+        const resultCard = document.getElementById('result-card');
+        const emptyState = document.getElementById('empty-state');
+        const lastUpdatedEl = document.getElementById('last-updated');
+
+        function formatDateIST(dateObj) {
+            const options = { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' };
+            const parts = new Intl.DateTimeFormat('en-CA', options).formatToParts(dateObj);
+            const year = parts.find(p => p.type === 'year').value;
+            const month = parts.find(p => p.type === 'month').value;
+            const day = parts.find(p => p.type === 'day').value;
+            return { year, month, day, formatted: `${year}-${month}-${day}` };
+        }
+
+        async function fetchAndDecompressGzip(filePath) {
+            const response = await fetch(filePath);
+            if (!response.ok) return null;
+            
+            if (typeof DecompressionStream !== 'undefined') {
+                const decompressedStream = response.body.pipeThrough(new DecompressionStream('gzip'));
+                return await new Response(decompressedStream).text();
+            } else {
+                throw new Error("Browser does not support DecompressionStream");
+            }
+        }
+
+        async function loadLatestNavData() {
+            let currentDate = new Date();
+            const maxDaysToTry = 14;
+
+            let schemesMap = {};
+            try {
+                const schemesJsonText = await fetchAndDecompressGzip('data/schemes.json.gz');
+                if (schemesJsonText) {
+                    schemesMap = JSON.parse(schemesJsonText);
+                }
+            } catch (err) {
+                console.warn("Failed loading schemes.json.gz:", err);
+            }
+
+            for (let i = 0; i < maxDaysToTry; i++) {
+                const d = new Date(currentDate);
+                d.setDate(d.getDate() - i);
+                const { year, month, formatted } = formatDateIST(d);
+                const filePath = `data/${year}/${month}/nav_${formatted}.csv.gz`;
+
+                try {
+                    const csvText = await fetchAndDecompressGzip(filePath);
+                    if (csvText !== null) {
+                        Papa.parse(csvText, {
+                            header: true,
+                            skipEmptyLines: true,
+                            complete: function(results) {
+                                navData = results.data.map(row => {
+                                    const code = String(row.scheme_code || '').trim();
+                                    const meta = schemesMap[code] || ['', '', row.scheme_name || `Scheme ${code}`];
+                                    return {
+                                        scheme_code: code,
+                                        nav: row.nav,
+                                        nav_date: row.nav_date,
+                                        isin_payout_or_growth: row.isin_payout_or_growth || meta[0] || '-',
+                                        isin_reinvestment: row.isin_reinvestment || meta[1] || '-',
+                                        scheme_name: row.scheme_name || meta[2] || `Scheme ${code}`
+                                    };
+                                });
+
+                                searchInput.disabled = false;
+                                searchInput.placeholder = `Search among ${navData.length.toLocaleString()} schemes...`;
+                                
+                                const latestDate = (navData.length > 0 && navData[0].nav_date) ? navData[0].nav_date : formatted;
+                                lastUpdatedEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Updated ${latestDate}`;
+                                
+                                const downloadBtn = document.getElementById('download-btn');
+                                if (downloadBtn) {
+                                    downloadBtn.href = filePath;
+                                    downloadBtn.download = `nav_${latestDate}.csv.gz`;
+                                }
+
+                                renderRecentSearches();
+                            }
+                        });
+                        return;
+                    }
+                } catch (err) {
+                    console.warn(`Attempt for ${filePath} failed:`, err);
+                }
+            }
+
+            searchInput.placeholder = "Error loading data.";
+            lastUpdatedEl.innerHTML = `<i class="fas fa-exclamation-triangle text-rose-500"></i> Error loading`;
+        }
+
+        loadLatestNavData();
+
+        // Search logic
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase().trim();
+            resultsDropdown.innerHTML = '';
+            
+            if (query.length > 0) {
+                clearSearchBtn.classList.remove('hidden');
+            } else {
+                clearSearchBtn.classList.add('hidden');
+            }
+
+            if (query.length < 2) {
+                resultsDropdown.classList.add('hidden');
+                return;
+            }
+
+            const matches = navData.filter(row => {
+                return (row.scheme_name && row.scheme_name.toLowerCase().includes(query)) ||
+                       (row.scheme_code && row.scheme_code.includes(query)) ||
+                       (row.isin_payout_or_growth && row.isin_payout_or_growth.toLowerCase().includes(query)) ||
+                       (row.isin_reinvestment && row.isin_reinvestment.toLowerCase().includes(query));
+            }).slice(0, 35);
+
+            if (matches.length > 0) {
+                matches.forEach(match => {
+                    const div = document.createElement('div');
+                    div.className = 'px-4 py-3 cursor-pointer hover:bg-slate-800/80 transition-colors flex flex-col gap-0.5';
+                    div.innerHTML = `
+                        <div class="font-medium text-slate-200 text-sm leading-snug">${highlightMatch(match.scheme_name, query)}</div>
+                        <div class="text-xs text-slate-500 flex items-center gap-3 font-mono">
+                            <span class="text-sky-400 font-semibold">Code: ${highlightMatch(match.scheme_code, query)}</span>
+                            ${match.isin_payout_or_growth && match.isin_payout_or_growth !== '-' ? `<span>ISIN: ${highlightMatch(match.isin_payout_or_growth, query)}</span>` : ''}
+                        </div>
+                    `;
+                    div.addEventListener('click', () => {
+                        displayResult(match);
+                        saveRecentSearch(match);
+                        resultsDropdown.classList.add('hidden');
+                        searchInput.value = match.scheme_name;
+                    });
+                    resultsDropdown.appendChild(div);
+                });
+                resultsDropdown.classList.remove('hidden');
+            } else {
+                const div = document.createElement('div');
+                div.className = 'px-4 py-3 text-slate-500 text-xs italic text-center';
+                div.innerText = 'No matching schemes found.';
+                resultsDropdown.appendChild(div);
+                resultsDropdown.classList.remove('hidden');
+            }
+        });
+
+        // Clear search input
+        clearSearchBtn.addEventListener('click', () => {
+            searchInput.value = '';
+            clearSearchBtn.classList.add('hidden');
+            resultsDropdown.classList.add('hidden');
+            searchInput.focus();
+        });
+
+        // Keyboard Shortcut (Ctrl+K or Cmd+K)
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                searchInput.focus();
+            }
+        });
+
+        // Filter chips
+        document.querySelectorAll('.filter-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                const filterText = chip.getAttribute('data-filter');
+                searchInput.value = filterText;
+                searchInput.dispatchEvent(new Event('input'));
+                searchInput.focus();
+            });
+        });
+
+        // Highlight matching query text
+        function highlightMatch(text, query) {
+            if (!text) return '';
+            const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+            return text.replace(regex, '<mark class="bg-sky-500/20 text-sky-300 px-0.5 rounded font-semibold">$1</mark>');
+        }
+
+        // Display selected result card
+        function displayResult(scheme) {
+            document.getElementById('res-name').textContent = scheme.scheme_name || 'N/A';
+            document.getElementById('res-nav').textContent = scheme.nav || 'N/A';
+            document.getElementById('res-date').textContent = scheme.nav_date || 'N/A';
+            document.getElementById('res-code').textContent = scheme.scheme_code || 'N/A';
+            
+            // ISIN Payout / Growth
+            const mainIsin = (scheme.isin_payout_or_growth && scheme.isin_payout_or_growth !== '-' && scheme.isin_payout_or_growth !== 'N/A') ? scheme.isin_payout_or_growth : null;
+            const mainIsinCard = document.getElementById('res-isin-card');
+            if (mainIsin) {
+                document.getElementById('res-isin').textContent = mainIsin;
+                mainIsinCard.classList.remove('hidden');
+            } else {
+                mainIsinCard.classList.add('hidden');
+            }
+
+            // ISIN Reinvestment
+            const reinvIsin = (scheme.isin_reinvestment && scheme.isin_reinvestment !== '-' && scheme.isin_reinvestment !== 'N/A') ? scheme.isin_reinvestment : null;
+            const reinvCard = document.getElementById('res-isin-reinv-card');
+            if (reinvIsin) {
+                document.getElementById('res-isin-reinv').textContent = reinvIsin;
+                reinvCard.classList.remove('hidden');
+            } else {
+                reinvCard.classList.add('hidden');
+            }
+            
+            emptyState.classList.add('hidden');
+            resultCard.classList.remove('hidden');
+        }
+
+        // Copy buttons
+        document.querySelectorAll('.copy-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const targetId = btn.getAttribute('data-copy-target');
+                const text = document.getElementById(targetId).textContent;
+                navigator.clipboard.writeText(text);
+                const origIcon = btn.innerHTML;
+                btn.innerHTML = `<i class="fas fa-check text-emerald-400 text-sm"></i>`;
+                setTimeout(() => { btn.innerHTML = origIcon; }, 1800);
+            });
+        });
+
+        // Recent search tracking
+        function saveRecentSearch(scheme) {
+            recentSearches = recentSearches.filter(item => item.scheme_code !== scheme.scheme_code);
+            recentSearches.unshift(scheme);
+            if (recentSearches.length > 5) recentSearches.pop();
+            localStorage.setItem('mf_recent_searches', JSON.stringify(recentSearches));
+            renderRecentSearches();
+        }
+
+        function renderRecentSearches() {
+            const container = document.getElementById('recent-searches-container');
+            const list = document.getElementById('recent-searches-list');
+            if (recentSearches.length === 0) {
+                container.classList.add('hidden');
+                return;
+            }
+            list.innerHTML = '';
+            recentSearches.forEach(scheme => {
+                const btn = document.createElement('button');
+                btn.className = 'text-xs px-2.5 py-1 rounded-md bg-slate-900 border border-slate-800 text-slate-300 font-medium hover:border-sky-500/50 hover:text-sky-400 transition-all flex items-center gap-1.5';
+                btn.innerHTML = `<i class="far fa-clock text-slate-500"></i> ${scheme.scheme_name.substring(0, 28)}...`;
+                btn.addEventListener('click', () => {
+                    displayResult(scheme);
+                    searchInput.value = scheme.scheme_name;
+                });
+                list.appendChild(btn);
+            });
+            container.classList.remove('hidden');
+        }
+
+        document.getElementById('clear-recent-btn').addEventListener('click', () => {
+            recentSearches = [];
+            localStorage.removeItem('mf_recent_searches');
+            renderRecentSearches();
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!searchInput.contains(e.target) && !resultsDropdown.contains(e.target)) {
+                resultsDropdown.classList.add('hidden');
+            }
+        });
+    </script>
+</body>
+</html>
