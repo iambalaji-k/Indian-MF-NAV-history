@@ -198,6 +198,10 @@ data/*.db
 data/*.db-*
 data/schemes.csv
 latest_nav.csv
+*.txt
+!*.txt.gz
+*.csv
+!*.csv.gz
 
 # PyPI configuration file
 .pypirc
