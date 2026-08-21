@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import gzip
+import json
+import os
 import shutil
 import sqlite3
 import unittest
@@ -12,6 +14,13 @@ from decimal import Decimal
 from pathlib import Path
 
 from scripts.fetch_and_update import (
+    ColumnMap,
+    NavRow,
+    check_and_update_feed_profile,
+    check_row_count_plausibility,
+    check_stale_feed,
+    detect_feed_layout,
+    parse_nav_feed,
     parse_nav_text,
     sync_up_databases_to_r2,
     update_databases,
@@ -78,6 +87,59 @@ class FetchAndUpdateTests(unittest.TestCase):
 
         self.assertEqual(invalid, 0)
         self.assertEqual(rows[0].nav, Decimal("12.3457"))
+
+    def test_parses_new_eight_column_amfi_format(self) -> None:
+        text = "\n".join(
+            [
+                "Open Ended Schemes (Debt Scheme)",
+                "119551;INF209KA12Z1;INF209KA13Z9;Aditya Birla Sun Life Banking & PSU Debt Fund;Direct Plan;IDCW-Re-investment;106.9996;20-Aug-2026",
+                "119552;INF209K01YM2;-;Aditya Birla Sun Life Banking & PSU Debt Fund;Direct Plan;MONTHLY DCW Payout;117.3095;20-Aug-2026",
+            ]
+        )
+
+        rows, invalid = parse_nav_text(text)
+
+        self.assertEqual(invalid, 0)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0].scheme_code, 119551)
+        self.assertEqual(rows[0].isin_payout_or_growth, "INF209KA12Z1")
+        self.assertEqual(rows[0].isin_reinvestment, "INF209KA13Z9")
+        self.assertEqual(rows[0].scheme_name, "Aditya Birla Sun Life Banking & PSU Debt Fund")
+        self.assertEqual(rows[0].nav, Decimal("106.9996"))
+        self.assertEqual(rows[0].nav_date, date(2026, 8, 20))
+        self.assertEqual(rows[1].isin_reinvestment, "-")
+        self.assertEqual(rows[1].nav, Decimal("117.3095"))
+
+    def test_parses_mixed_legacy_and_eight_column_formats(self) -> None:
+        text = "\n".join(
+            [
+                sample_line(100001, "Legacy Fund", "10.00", "01-Apr-2026"),
+                "119551;INF209KA12Z1;;New Format Fund;Direct Plan;Growth;106.9996;20-Aug-2026",
+            ]
+        )
+
+        rows, invalid = parse_nav_text(text)
+
+        self.assertEqual(invalid, 0)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0].scheme_code, 100001)
+        self.assertEqual(rows[0].nav, Decimal("10.0000"))
+        self.assertEqual(rows[1].scheme_code, 119551)
+        self.assertEqual(rows[1].nav, Decimal("106.9996"))
+        self.assertEqual(rows[1].nav_date, date(2026, 8, 20))
+
+    def test_unsupported_column_count_is_skipped(self) -> None:
+        text = "\n".join(
+            [
+                "100001;INF000000001;;Too Few Columns;12.00",
+                "100002;INF000000002;;Wrong Shape;NoDateFound;NoNavFound;StillNoDate",
+            ]
+        )
+
+        rows, invalid = parse_nav_text(text)
+
+        self.assertEqual(rows, [])
+        self.assertEqual(invalid, 2)
 
     def test_duplicate_run_same_day_is_ignored(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:
@@ -357,6 +419,119 @@ class FetchAndUpdateTests(unittest.TestCase):
             db_hashes = {db_path: "old-hash"}
             with self.assertRaises(RuntimeError):
                 sync_up_databases_to_r2(db_hashes, data_dir, config)
+
+    def test_parses_dynamic_seven_and_nine_column_layouts(self) -> None:
+        text_9col = "\n".join(
+            [
+                "119551;INF209KA12Z1;INF209KA13Z9;Aditya Birla Sun Life Banking Fund;Direct Plan;Growth;EXTRA_CAT;106.9996;20-Aug-2026",
+                "119552;INF209K01YM2;-;Aditya Birla Debt Fund;Regular Plan;IDCW;EXTRA_CAT;117.3095;20-Aug-2026",
+            ]
+        )
+        rows, invalid, layouts = parse_nav_feed(text_9col)
+        self.assertEqual(invalid, 0)
+        self.assertEqual(len(rows), 2)
+        self.assertIn(9, layouts)
+        self.assertEqual(layouts[9].layout_name, "9col_dynamic")
+        self.assertEqual(layouts[9].nav_idx, 7)
+        self.assertEqual(layouts[9].date_idx, 8)
+        self.assertEqual(rows[0].scheme_code, 119551)
+        self.assertEqual(rows[0].nav, Decimal("106.9996"))
+        self.assertEqual(rows[0].nav_date, date(2026, 8, 20))
+
+        text_7col = "119553;INF209KA12Z1;;7Col Test Fund;Direct Plan;10.5000;20-Aug-2026"
+        rows_7, invalid_7, layouts_7 = parse_nav_feed(text_7col)
+        self.assertEqual(invalid_7, 0)
+        self.assertEqual(len(rows_7), 1)
+        self.assertIn(7, layouts_7)
+        self.assertEqual(rows_7[0].scheme_code, 119553)
+        self.assertEqual(rows_7[0].nav, Decimal("10.5000"))
+        self.assertEqual(rows_7[0].nav_date, date(2026, 8, 20))
+
+    def test_parses_shuffled_column_layout(self) -> None:
+        # Shuffled: Scheme Code, ISIN, Date, NAV, Scheme Name
+        text_shuffled = "119551;INF209KA12Z1;20-Aug-2026;106.9996;Aditya Birla Sun Life Banking Fund"
+        rows, invalid, layouts = parse_nav_feed(text_shuffled)
+        self.assertEqual(invalid, 0)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].scheme_code, 119551)
+        self.assertEqual(rows[0].isin_payout_or_growth, "INF209KA12Z1")
+        self.assertEqual(rows[0].scheme_name, "Aditya Birla Sun Life Banking Fund")
+        self.assertEqual(rows[0].nav, Decimal("106.9996"))
+        self.assertEqual(rows[0].nav_date, date(2026, 8, 20))
+
+    def test_unparseable_low_confidence_layout_fails_loudly(self) -> None:
+        sample_unparseable = [
+            ["foo", "bar", "baz", "qux", "quux"]
+        ]
+        with self.assertRaises(ValueError):
+            detect_feed_layout(sample_unparseable, 5)
+
+    def test_feed_profile_saved_and_drift_detected(self) -> None:
+        with WorkspaceTemporaryDirectory() as tmp:
+            data_dir = Path(tmp) / "data"
+            layout_6col = {6: ColumnMap(0, 1, 2, 3, 4, 5, "6col_legacy", 1.0)}
+            layout_8col = {8: ColumnMap(0, 1, 2, 3, 6, 7, "8col_standard", 1.0)}
+
+            # First run: writes profile, no drift detected
+            drift = check_and_update_feed_profile(layout_6col, 100, date(2026, 4, 1), data_dir)
+            self.assertFalse(drift)
+            profile_file = data_dir / ".feed_profile.json"
+            self.assertTrue(profile_file.exists())
+            profile_data = json.loads(profile_file.read_text(encoding="utf-8"))
+            self.assertIn("6", profile_data["layouts"])
+
+            # Second run: layout shifts to 8-col -> drift detected
+            drift_2 = check_and_update_feed_profile(layout_8col, 100, date(2026, 8, 20), data_dir)
+            self.assertTrue(drift_2)
+
+            # Strict mode test without allow flag raises RuntimeError
+            with self.assertRaises(RuntimeError):
+                check_and_update_feed_profile(layout_6col, 100, date(2026, 8, 21), data_dir, strict_drift=True)
+
+    def test_row_count_sanity_gate(self) -> None:
+        with WorkspaceTemporaryDirectory() as tmp:
+            data_dir = Path(tmp) / "data"
+            db_path = data_dir / "nav_fy_2026_27.db"
+            
+            # Setup database with 7 days of 1000 rows each
+            from scripts.fetch_and_update import init_db
+            init_db(db_path)
+            with closing(sqlite3.connect(db_path)) as conn:
+                for d in range(1, 8):
+                    dt_str = f"2026-04-0{d}"
+                    for s in range(1001, 2001):
+                        conn.execute(
+                            "INSERT OR IGNORE INTO schemes (scheme_code, scheme_name, first_seen_date, last_seen_date) VALUES (?, 'Test', ?, ?)",
+                            (s, dt_str, dt_str)
+                        )
+                        conn.execute(
+                            "INSERT OR IGNORE INTO nav_history (scheme_code, nav_date, nav) VALUES (?, ?, '10.0000')",
+                            (s, dt_str)
+                        )
+                conn.commit()
+
+            # 900 rows parsed (> 80% of 1000 median) -> PASS
+            check_row_count_plausibility(900, data_dir, min_ratio=0.80)
+
+            # 700 rows parsed (< 80% of 1000 median) -> FAIL
+            with self.assertRaises(RuntimeError) as ctx:
+                check_row_count_plausibility(700, data_dir, min_ratio=0.80)
+            self.assertIn("Row count sanity gate failed", str(ctx.exception))
+
+    def test_stale_feed_warning(self) -> None:
+        rows = [
+            NavRow(100001, None, None, "Test", Decimal("10.00"), date(2026, 8, 1))
+        ]
+        check_stale_feed(rows, date(2026, 8, 11), max_stale_days=4)
+
+    @unittest.skipUnless(os.environ.get("LIVE_FEED") == "1", "Requires LIVE_FEED=1")
+    def test_live_amfi_canary(self) -> None:
+        from scripts.fetch_and_update import fetch_text
+        text = fetch_text("https://portal.amfiindia.com/spages/NAVAll.txt")
+        rows, invalid, layouts = parse_nav_feed(text)
+        self.assertGreater(len(rows), 5000, "Expected > 5,000 schemes in real AMFI feed")
+        self.assertLess(invalid, len(rows) * 0.05, "Invalid rows should be < 5% of feed")
+        self.assertTrue(len(layouts) > 0, "Expected at least 1 detected layout")
 
 
 if __name__ == "__main__":

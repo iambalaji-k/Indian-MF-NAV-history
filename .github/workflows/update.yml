@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   update:
@@ -50,3 +51,13 @@ jobs:
             git commit -m "Daily NAV update"
             git push
           fi
+
+      - name: Alert on workflow failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "🚨 AMFI Feed Drift / Daily NAV Update Failure" \
+            --body "Daily NAV update workflow failed on $(date -u '+%Y-%m-%d %H:%M:%S UTC'). Please check workflow logs for feed layout changes, validation errors, or sanity gate failures: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --label "bug" || echo "Note: Could not open GitHub issue; verify repository permissions."

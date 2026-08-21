@@ -45,6 +45,10 @@ NAV_QUANT = Decimal("0.0001")
 SCHEME_LINE_RE = re.compile(r"^\s*\d+\s*;")
 
 
+ISIN_RE = re.compile(r"^INF[0-9A-Z]{9}$")
+FEED_PROFILE_FILE = ".feed_profile.json"
+
+
 @dataclass(frozen=True)
 class NavRow:
     scheme_code: int
@@ -53,6 +57,18 @@ class NavRow:
     scheme_name: str
     nav: Decimal
     nav_date: date
+
+
+@dataclass(frozen=True)
+class ColumnMap:
+    scheme_code_idx: int
+    isin_payout_idx: int | None
+    isin_reinvest_idx: int | None
+    scheme_name_idx: int
+    nav_idx: int
+    date_idx: int
+    layout_name: str
+    confidence: float
 
 
 def setup_logging(log_file: Path) -> None:
@@ -82,19 +98,36 @@ def fetch_text(url: str, retries: int = 3, timeout: int = 10) -> str:
     raise RuntimeError(f"Failed to fetch AMFI NAV file after {retries} attempts") from last_error
 
 
-def parse_amfi_date(value: str) -> date:
+def try_parse_amfi_date(value: str) -> date | None:
     cleaned = value.strip()
     for fmt in ("%d-%b-%Y", "%d-%b-%y", "%d/%m/%Y", "%d-%m-%Y"):
         try:
             return datetime.strptime(cleaned, fmt).date()
         except ValueError:
             continue
+    return None
+
+
+def parse_amfi_date(value: str) -> date:
+    parsed = try_parse_amfi_date(value)
+    if parsed is not None:
+        return parsed
     raise ValueError(f"invalid date: {value!r}")
 
 
 def clean_optional(value: str) -> str | None:
     cleaned = value.strip()
     return cleaned or None
+
+
+def try_normalize_nav(value: str) -> Decimal | None:
+    try:
+        nav = Decimal(value.strip()).quantize(NAV_QUANT, rounding=ROUND_HALF_UP)
+        if nav.is_nan() or nav.is_infinite() or nav <= 0:
+            return None
+        return nav
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def normalize_nav(value: str) -> Decimal:
@@ -108,53 +141,362 @@ def format_nav(nav: Decimal) -> str:
     return f"{nav:.4f}"
 
 
-def parse_nav_text(text: str) -> tuple[list[NavRow], int]:
-    rows: list[NavRow] = []
-    invalid_count = 0
+def resolve_feed_columns(column_count: int) -> tuple[int, int] | None:
+    if column_count >= 8:
+        return 6, 7
+    if column_count == 6:
+        return 4, 5
+    return None
 
+
+def detect_feed_layout(sample_rows: list[list[str]], col_count: int) -> ColumnMap:
+    # 1. Fast path for known standard layouts
+    if col_count == 8:
+        return ColumnMap(
+            scheme_code_idx=0,
+            isin_payout_idx=1,
+            isin_reinvest_idx=2,
+            scheme_name_idx=3,
+            nav_idx=6,
+            date_idx=7,
+            layout_name="8col_standard",
+            confidence=1.0,
+        )
+    if col_count == 6:
+        return ColumnMap(
+            scheme_code_idx=0,
+            isin_payout_idx=1,
+            isin_reinvest_idx=2,
+            scheme_name_idx=3,
+            nav_idx=4,
+            date_idx=5,
+            layout_name="6col_legacy",
+            confidence=1.0,
+        )
+
+    if col_count < 4 or not sample_rows:
+        raise ValueError(f"Cannot detect layout for column count {col_count}")
+
+    num_samples = len(sample_rows)
+
+    # 2. Date column scoring: rightmost column with >= 80% valid date strings
+    date_idx = None
+    best_date_score = 0.0
+    for col in reversed(range(col_count)):
+        matches = sum(1 for row in sample_rows if col < len(row) and try_parse_amfi_date(row[col]) is not None)
+        score = matches / num_samples
+        if score >= 0.80 and score > best_date_score:
+            best_date_score = score
+            date_idx = col
+
+    if date_idx is None:
+        raise ValueError(f"Failed to detect date column in {col_count}-col layout")
+
+    # 3. NAV column scoring: rightmost column (excluding date) with >= 80% valid positive decimals
+    nav_idx = None
+    best_nav_score = 0.0
+    for col in reversed(range(col_count)):
+        if col == date_idx:
+            continue
+        matches = sum(1 for row in sample_rows if col < len(row) and try_normalize_nav(row[col]) is not None)
+        score = matches / num_samples
+        if score >= 0.80 and score > best_nav_score:
+            best_nav_score = score
+            nav_idx = col
+
+    if nav_idx is None:
+        raise ValueError(f"Failed to detect NAV column in {col_count}-col layout")
+
+    # 4. Scheme code column: first integer column (excluding date, nav) where >= 85% parse as positive int
+    code_idx = None
+    for col in range(col_count):
+        if col in (date_idx, nav_idx):
+            continue
+        int_matches = 0
+        for row in sample_rows:
+            if col < len(row):
+                val = row[col].strip()
+                if val.isdigit() and int(val) > 0:
+                    int_matches += 1
+        if int_matches / num_samples >= 0.85:
+            code_idx = col
+            break
+
+    if code_idx is None:
+        raise ValueError(f"Failed to detect scheme code column in {col_count}-col layout")
+
+    # 5. ISIN columns: columns matching ^INF[0-9A-Z]{9}$ or placeholder
+    isin_cols: list[int] = []
+    for col in range(col_count):
+        if col in (date_idx, nav_idx, code_idx):
+            continue
+        isin_matches = 0
+        non_empty = 0
+        for row in sample_rows:
+            if col < len(row):
+                val = row[col].strip()
+                if val and val not in ("-", "N.A.", "NA", "N/A"):
+                    non_empty += 1
+                    if ISIN_RE.match(val):
+                        isin_matches += 1
+        if non_empty > 0 and (isin_matches / non_empty) >= 0.80 and isin_matches >= 1:
+            isin_cols.append(col)
+
+    isin1_idx = isin_cols[0] if len(isin_cols) > 0 else None
+    isin2_idx = isin_cols[1] if len(isin_cols) > 1 else None
+
+    # 6. Scheme Name column: remaining column with highest average text length
+    candidate_name_cols = [
+        c for c in range(col_count)
+        if c not in (date_idx, nav_idx, code_idx) and c not in isin_cols
+    ]
+    if not candidate_name_cols:
+        raise ValueError(f"No available column for scheme name in {col_count}-col layout")
+
+    def name_score(col: int) -> float:
+        total_len = sum(len(row[col].strip()) for row in sample_rows if col < len(row))
+        return total_len / num_samples
+
+    name_idx = max(candidate_name_cols, key=name_score)
+    confidence = min(best_date_score, best_nav_score)
+
+    return ColumnMap(
+        scheme_code_idx=code_idx,
+        isin_payout_idx=isin1_idx,
+        isin_reinvest_idx=isin2_idx,
+        scheme_name_idx=name_idx,
+        nav_idx=nav_idx,
+        date_idx=date_idx,
+        layout_name=f"{col_count}col_dynamic",
+        confidence=round(confidence, 2),
+    )
+
+
+def parse_nav_feed(text: str) -> tuple[list[NavRow], int, dict[int, ColumnMap]]:
+    parsed_lines: list[tuple[int, list[str]]] = []
     for line_number, raw_line in enumerate(text.splitlines(), start=1):
         line = raw_line.strip()
         if not line or not SCHEME_LINE_RE.match(line):
             continue
-
         parts = [part.strip() for part in line.split(";")]
-        if len(parts) != 6:
-            invalid_count += 1
-            logging.warning("Skipping line %s: expected 6 columns, got %s", line_number, len(parts))
-            continue
+        parsed_lines.append((line_number, parts))
 
+    if not parsed_lines:
+        return [], 0, {}
+
+    lines_by_col_count: dict[int, list[tuple[int, list[str]]]] = {}
+    for line_number, parts in parsed_lines:
+        lines_by_col_count.setdefault(len(parts), []).append((line_number, parts))
+
+    detected_layouts: dict[int, ColumnMap] = {}
+    rows: list[NavRow] = []
+    invalid_count = 0
+
+    for col_count, line_group in lines_by_col_count.items():
+        sample_parts = [parts for _, parts in line_group[:500]]
         try:
-            scheme_code = int(parts[0])
-            nav_decimal = normalize_nav(parts[4])
-            nav_date = parse_amfi_date(parts[5])
-            if nav_date < MIN_NAV_DATE:
-                logging.info(
-                    "Skipping line %s: NAV date %s is before cutoff %s",
-                    line_number,
-                    nav_date.isoformat(),
-                    MIN_NAV_DATE.isoformat(),
-                )
-                continue
-            scheme_name = parts[3].strip()
-            if not scheme_name:
-                raise ValueError("missing scheme name")
-        except (ValueError, InvalidOperation) as exc:
-            invalid_count += 1
-            logging.warning("Skipping line %s: %s", line_number, exc)
+            col_map = detect_feed_layout(sample_parts, col_count)
+            detected_layouts[col_count] = col_map
+        except (ValueError, RuntimeError) as exc:
+            invalid_count += len(line_group)
+            logging.warning("Skipping %d lines with unsupported/unparseable %d-column layout: %s", len(line_group), col_count, exc)
             continue
 
-        rows.append(
-            NavRow(
-                scheme_code=scheme_code,
-                isin_payout_or_growth=clean_optional(parts[1]),
-                isin_reinvestment=clean_optional(parts[2]),
-                scheme_name=scheme_name,
-                nav=nav_decimal,
-                nav_date=nav_date,
+        for line_number, parts in line_group:
+            try:
+                scheme_code = int(parts[col_map.scheme_code_idx])
+                nav_decimal = normalize_nav(parts[col_map.nav_idx])
+                nav_date = parse_amfi_date(parts[col_map.date_idx])
+                if nav_date < MIN_NAV_DATE:
+                    logging.info(
+                        "Skipping line %s: NAV date %s is before cutoff %s",
+                        line_number,
+                        nav_date.isoformat(),
+                        MIN_NAV_DATE.isoformat(),
+                    )
+                    continue
+                scheme_name = parts[col_map.scheme_name_idx].strip()
+                if not scheme_name:
+                    raise ValueError("missing scheme name")
+                isin1 = clean_optional(parts[col_map.isin_payout_idx]) if col_map.isin_payout_idx is not None else None
+                isin2 = clean_optional(parts[col_map.isin_reinvest_idx]) if col_map.isin_reinvest_idx is not None else None
+            except (ValueError, InvalidOperation, IndexError) as exc:
+                invalid_count += 1
+                logging.warning("Skipping line %s: %s", line_number, exc)
+                continue
+
+            rows.append(
+                NavRow(
+                    scheme_code=scheme_code,
+                    isin_payout_or_growth=isin1,
+                    isin_reinvestment=isin2,
+                    scheme_name=scheme_name,
+                    nav=nav_decimal,
+                    nav_date=nav_date,
+                )
             )
+
+    return rows, invalid_count, detected_layouts
+
+
+def parse_nav_text(text: str) -> tuple[list[NavRow], int]:
+    rows, invalid_count, _ = parse_nav_feed(text)
+    return rows, invalid_count
+
+
+def log_feed_summary(rows: list[NavRow], invalid_count: int, layouts: dict[int, ColumnMap]) -> None:
+    distinct_dates = len({r.nav_date for r in rows}) if rows else 0
+    newest_date = max((r.nav_date for r in rows), default=None)
+    layout_desc = "; ".join(
+        f"{cols}col:{cm.layout_name}[code={cm.scheme_code_idx},name={cm.scheme_name_idx},nav={cm.nav_idx},date={cm.date_idx},conf={cm.confidence}]"
+        for cols, cm in layouts.items()
+    )
+    logging.info(
+        "FEED_SUMMARY: layouts={%s} rows=%d distinct_dates=%d newest_date=%s invalid_rows=%d",
+        layout_desc,
+        len(rows),
+        distinct_dates,
+        newest_date.isoformat() if newest_date else "None",
+        invalid_count,
+    )
+
+
+def check_stale_feed(rows: list[NavRow], seen_on: date, max_stale_days: int = 4) -> None:
+    if not rows:
+        return
+    newest_date = max(row.nav_date for row in rows)
+    age_days = (seen_on - newest_date).days
+    if age_days > max_stale_days:
+        logging.warning(
+            "STALE_FEED_WARNING: Newest NAV date in feed is %s (%d days behind run date %s).",
+            newest_date.isoformat(),
+            age_days,
+            seen_on.isoformat(),
         )
 
-    return rows, invalid_count
+
+def check_and_update_feed_profile(
+    layouts: dict[int, ColumnMap],
+    total_rows: int,
+    seen_on: date,
+    data_dir: Path,
+    allow_feed_drift: bool = False,
+    strict_drift: bool = False,
+) -> bool:
+    profile_path = data_dir / FEED_PROFILE_FILE
+    current_profile_layouts = {
+        str(col_count): {
+            "layout_name": cm.layout_name,
+            "col_count": col_count,
+            "scheme_code_idx": cm.scheme_code_idx,
+            "isin_payout_idx": cm.isin_payout_idx,
+            "isin_reinvest_idx": cm.isin_reinvest_idx,
+            "scheme_name_idx": cm.scheme_name_idx,
+            "nav_idx": cm.nav_idx,
+            "date_idx": cm.date_idx,
+            "confidence": cm.confidence,
+        }
+        for col_count, cm in layouts.items()
+    }
+
+    drift_detected = False
+    if profile_path.exists():
+        try:
+            prev_profile = json.loads(profile_path.read_text(encoding="utf-8"))
+            prev_layouts = prev_profile.get("layouts", {})
+            if prev_layouts != current_profile_layouts:
+                drift_detected = True
+                logging.warning(
+                    "FEED_DRIFT_ALARM: AMFI feed layout changed! Previous: %s, Current: %s",
+                    prev_layouts,
+                    current_profile_layouts,
+                )
+                if strict_drift and not allow_feed_drift:
+                    raise RuntimeError(
+                        "Feed drift detected with --strict-feed-drift. Pass --allow-feed-drift to accept changes."
+                    )
+        except json.JSONDecodeError:
+            logging.warning("Failed to parse existing %s, will overwrite.", profile_path)
+
+    new_profile = {
+        "last_updated": seen_on.isoformat(),
+        "total_rows": total_rows,
+        "layouts": current_profile_layouts,
+    }
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        profile_path.write_text(json.dumps(new_profile, indent=2), encoding="utf-8")
+        logging.info("Saved feed profile to %s", profile_path)
+    except OSError as exc:
+        logging.warning("Could not write feed profile to %s: %s", profile_path, exc)
+
+    return drift_detected
+
+
+def get_recent_daily_row_counts(data_dir: Path, limit: int = 7) -> list[int]:
+    db_files = list(data_dir.glob("nav_fy_*.db"))
+    if not db_files:
+        return []
+
+    date_counts: dict[str, int] = {}
+    for db_path in db_files:
+        try:
+            with closing(sqlite3.connect(db_path)) as conn:
+                tbl_exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='nav_history'"
+                ).fetchone()
+                if not tbl_exists:
+                    continue
+                for nav_date, count in conn.execute(
+                    "SELECT nav_date, COUNT(*) FROM nav_history GROUP BY nav_date"
+                ):
+                    date_counts[nav_date] = count
+        except sqlite3.Error as exc:
+            logging.warning("Error reading historical counts from %s: %s", db_path, exc)
+            continue
+
+    if not date_counts:
+        return []
+
+    sorted_dates = sorted(date_counts.keys(), reverse=True)[:limit]
+    return [date_counts[d] for d in sorted_dates]
+
+
+def check_row_count_plausibility(
+    parsed_count: int,
+    data_dir: Path,
+    min_ratio: float = 0.80,
+    min_history_days: int = 1,
+) -> None:
+    recent_counts = get_recent_daily_row_counts(data_dir, limit=7)
+    if len(recent_counts) < min_history_days:
+        logging.info(
+            "Row count sanity check: Insufficient history (%d days found); skipping gate.",
+            len(recent_counts),
+        )
+        return
+
+    sorted_counts = sorted(recent_counts)
+    n = len(sorted_counts)
+    mid = n // 2
+    median_count = (sorted_counts[mid] if n % 2 != 0 else (sorted_counts[mid - 1] + sorted_counts[mid]) / 2)
+
+    if median_count < 100:
+        logging.info("Row count sanity check: Median count is small (%s); skipping gate.", median_count)
+        return
+
+    threshold = median_count * min_ratio
+    if parsed_count < threshold:
+        raise RuntimeError(
+            f"Row count sanity gate failed: parsed {parsed_count} rows, which is below "
+            f"{min_ratio:.0%} of 7-day median ({median_count:.0f} rows, threshold: {threshold:.0f})"
+        )
+    logging.info(
+        "Row count sanity gate passed: %d rows (7-day median: %.0f, threshold: %.0f)",
+        parsed_count,
+        median_count,
+        threshold,
+    )
 
 
 def financial_year_label(nav_date: date) -> str:
@@ -456,6 +798,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=int, default=10)
     parser.add_argument("--r2-sync", action="store_true", help="Download DBs from R2 before update and upload them after.")
     parser.add_argument("--env-file", type=Path, default=ROOT_DIR / ".env")
+    parser.add_argument("--allow-feed-drift", action="store_true", help="Allow feed drift under strict mode.")
+    parser.add_argument("--strict-feed-drift", action="store_true", help="Fail if feed layout changes vs saved profile.")
+    parser.add_argument("--skip-sanity", action="store_true", help="Skip row count plausibility sanity gate.")
     return parser
 
 
@@ -467,13 +812,31 @@ def main(argv: list[str] | None = None) -> int:
     try:
         load_dotenv(args.env_file)
         text = load_input(args)
-        rows, invalid_count = parse_nav_text(text)
+        rows, invalid_count, detected_layouts = parse_nav_feed(text)
+        log_feed_summary(rows, invalid_count, detected_layouts)
         logging.info("Parsed %s valid NAV rows; skipped %s invalid rows", len(rows), invalid_count)
+        if not rows and args.input is None:
+            raise RuntimeError(
+                "AMFI feed yielded zero valid NAV rows; aborting to avoid publishing an empty dataset"
+            )
+
+        check_stale_feed(rows, seen_on)
+        check_and_update_feed_profile(
+            detected_layouts,
+            len(rows),
+            seen_on,
+            args.data_dir,
+            allow_feed_drift=args.allow_feed_drift,
+            strict_drift=args.strict_feed_drift,
+        )
+
         db_paths = db_paths_for_rows(rows, args.data_dir)
         r2_config = R2Config.from_env() if args.r2_sync else None
         if r2_config:
             with r2_lock(r2_config):
                 sync_down_databases_from_r2(db_paths, args.data_dir, r2_config)
+                if not args.skip_sanity and args.input is None:
+                    check_row_count_plausibility(len(rows), args.data_dir)
                 db_hashes = {path: file_sha256(path) for path in db_paths}
                 update_databases(rows, seen_on, args.data_dir)
                 write_daily_run_csv(args.data_dir, rows, seen_on)
@@ -484,6 +847,8 @@ def main(argv: list[str] | None = None) -> int:
                     write_schemes_json(schemes_source_db, args.data_dir / "schemes.json.gz")
                 sync_up_databases_to_r2(db_hashes, args.data_dir, r2_config)
         else:
+            if not args.skip_sanity and args.input is None:
+                check_row_count_plausibility(len(rows), args.data_dir)
             update_databases(rows, seen_on, args.data_dir)
             write_daily_run_csv(args.data_dir, rows, seen_on)
             schemes_source_db = fy_db_path(seen_on, args.data_dir)
