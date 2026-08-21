@@ -1,0 +1,17 @@
+{
+  "last_updated": "2026-08-20",
+  "total_rows": 8840,
+  "layouts": {
+    "8": {
+      "layout_name": "8col_standard",
+      "col_count": 8,
+      "scheme_code_idx": 0,
+      "isin_payout_idx": 1,
+      "isin_reinvest_idx": 2,
+      "scheme_name_idx": 3,
+      "nav_idx": 6,
+      "date_idx": 7,
+      "confidence": 1.0
+    }
+  }
+}

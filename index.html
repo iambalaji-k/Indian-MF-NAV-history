@@ -256,39 +256,40 @@
                 try {
                     const csvText = await fetchAndDecompressGzip(filePath);
                     if (csvText !== null) {
-                        Papa.parse(csvText, {
+                        const parsed = Papa.parse(csvText, {
                             header: true,
-                            skipEmptyLines: true,
-                            complete: function(results) {
-                                navData = results.data.map(row => {
-                                    const code = String(row.scheme_code || '').trim();
-                                    const meta = schemesMap[code] || ['', '', row.scheme_name || `Scheme ${code}`];
-                                    return {
-                                        scheme_code: code,
-                                        nav: row.nav,
-                                        nav_date: row.nav_date,
-                                        isin_payout_or_growth: row.isin_payout_or_growth || meta[0] || '-',
-                                        isin_reinvestment: row.isin_reinvestment || meta[1] || '-',
-                                        scheme_name: row.scheme_name || meta[2] || `Scheme ${code}`
-                                    };
-                                });
-
-                                searchInput.disabled = false;
-                                searchInput.placeholder = `Search among ${navData.length.toLocaleString()} schemes...`;
-                                
-                                const latestDate = (navData.length > 0 && navData[0].nav_date) ? navData[0].nav_date : formatted;
-                                lastUpdatedEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Updated ${latestDate}`;
-                                
-                                const downloadBtn = document.getElementById('download-btn');
-                                if (downloadBtn) {
-                                    downloadBtn.href = filePath;
-                                    downloadBtn.download = `nav_${latestDate}.csv.gz`;
-                                }
-
-                                renderRecentSearches();
-                            }
+                            skipEmptyLines: true
                         });
-                        return;
+
+                        if (parsed.data && parsed.data.length > 0) {
+                            navData = parsed.data.map(row => {
+                                const code = String(row.scheme_code || '').trim();
+                                const meta = schemesMap[code] || ['', '', row.scheme_name || `Scheme ${code}`];
+                                return {
+                                    scheme_code: code,
+                                    nav: row.nav,
+                                    nav_date: row.nav_date,
+                                    isin_payout_or_growth: row.isin_payout_or_growth || meta[0] || '-',
+                                    isin_reinvestment: row.isin_reinvestment || meta[1] || '-',
+                                    scheme_name: row.scheme_name || meta[2] || `Scheme ${code}`
+                                };
+                            });
+
+                            searchInput.disabled = false;
+                            searchInput.placeholder = `Search among ${navData.length.toLocaleString()} schemes...`;
+                            
+                            const latestDate = (navData.length > 0 && navData[0].nav_date) ? navData[0].nav_date : formatted;
+                            lastUpdatedEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Updated ${latestDate}`;
+                            
+                            const downloadBtn = document.getElementById('download-btn');
+                            if (downloadBtn) {
+                                downloadBtn.href = filePath;
+                                downloadBtn.download = `nav_${latestDate}.csv.gz`;
+                            }
+
+                            renderRecentSearches();
+                            return;
+                        }
                     }
                 } catch (err) {
                     console.warn(`Attempt for ${filePath} failed:`, err);
