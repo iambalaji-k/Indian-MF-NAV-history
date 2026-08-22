@@ -5,6 +5,10 @@ on:
     - cron: "30 13 * * *"
   workflow_dispatch:
 
+concurrency:
+  group: nav-update
+  cancel-in-progress: false
+
 permissions:
   contents: write
   issues: write
@@ -12,6 +16,7 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -34,21 +39,21 @@ jobs:
         run: python scripts/fetch_and_update.py --r2-sync
 
       - name: Validate archive
-        run: python scripts/validator.py
+        run: python scripts/validator.py --window-days 90
 
       - name: Commit changes
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm -f latest_nav.csv data/schemes.csv 2>/dev/null || true
           if [ -d data ]; then
-            find data \( -name "*.csv.gz" -o -name "schemes.json.gz" \) -print0 | xargs -0 --no-run-if-empty git add
+            find data \( -name "*.csv.gz" -o -name "schemes.json.gz" -o -name "latest.json" \) -print0 | xargs -0 --no-run-if-empty git add
           fi
           if git diff --cached --quiet; then
             echo "No NAV changes to commit"
           else
             git commit -m "Daily NAV update"
+            git pull --rebase origin ${GITHUB_REF_NAME} || git pull --rebase
             git push
           fi
 
@@ -57,7 +62,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          TITLE="🚨 AMFI Feed Drift / Daily NAV Update Failure"
+          EXISTING=$(gh issue list --state open --search "${TITLE} in:title" --json number --jq 'length' 2>/dev/null) || EXISTING=0
+          if [ "${EXISTING:-0}" -gt 0 ]; then
+            echo "An open failure issue already exists; skipping duplicate."
+            exit 0
+          fi
           gh issue create \
-            --title "🚨 AMFI Feed Drift / Daily NAV Update Failure" \
+            --title "${TITLE}" \
             --body "Daily NAV update workflow failed on $(date -u '+%Y-%m-%d %H:%M:%S UTC'). Please check workflow logs for feed layout changes, validation errors, or sanity gate failures: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --label "bug" || echo "Note: Could not open GitHub issue; verify repository permissions."

@@ -193,6 +193,8 @@ cython_debug/
 .test-tmp/
 
 # Generated local runtime artifacts
+node_modules/
+.npm/
 logs/
 data/*.db
 data/*.db-*

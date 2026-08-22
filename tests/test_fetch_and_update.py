@@ -8,25 +8,30 @@ import shutil
 import sqlite3
 import unittest
 import uuid
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts.fetch_and_update import (
     ColumnMap,
     NavRow,
-    check_and_update_feed_profile,
+    all_fy_db_paths,
+    check_feed_drift,
     check_row_count_plausibility,
     check_stale_feed,
     detect_feed_layout,
+    fy_start_years_through,
+    normalize_nav,
     parse_nav_feed,
     parse_nav_text,
+    publish_artifacts,
+    save_feed_profile,
     sync_up_databases_to_r2,
     update_databases,
     write_daily_run_csv,
-    write_latest_csv,
-    write_schemes_csv,
+    write_schemes_json,
 )
 from scripts.r2_storage import R2Config, file_sha256
 
@@ -81,6 +86,17 @@ class FetchAndUpdateTests(unittest.TestCase):
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(invalid, 3)
+
+    def test_non_positive_nav_is_rejected(self) -> None:
+        for bad in ("-5.0000", "0", "0.0000", "-0.0001"):
+            rows, invalid = parse_nav_text(sample_line(nav=bad))
+            self.assertEqual(rows, [], f"NAV {bad} must be rejected")
+            self.assertEqual(invalid, 1)
+
+        with self.assertRaises(InvalidOperation):
+            normalize_nav("-10.00")
+        with self.assertRaises(InvalidOperation):
+            normalize_nav("0.00")
 
     def test_nav_is_decimal_quantized_to_four_places(self) -> None:
         rows, invalid = parse_nav_text(sample_line(nav="12.34567"))
@@ -145,7 +161,6 @@ class FetchAndUpdateTests(unittest.TestCase):
         with WorkspaceTemporaryDirectory() as tmp:
             data_dir = Path(tmp) / "data"
             rows, _ = parse_nav_text(sample_line())
-
             update_databases(rows, date(2026, 4, 2), data_dir)
             update_databases(rows, date(2026, 4, 2), data_dir)
 
@@ -208,7 +223,6 @@ class FetchAndUpdateTests(unittest.TestCase):
 
             update_databases(rows, date(2027, 4, 2), data_dir)
 
-            self.assertFalse((data_dir / "nav.db").exists())
             self.assertTrue((data_dir / "nav_fy_2026_27.db").exists())
             self.assertFalse((data_dir / "nav_fy_2027_28.db").exists())
 
@@ -272,7 +286,7 @@ class FetchAndUpdateTests(unittest.TestCase):
                 },
             )
 
-    def test_daily_run_csv_is_created_with_nested_folders(self) -> None:
+    def test_daily_run_csv_is_named_by_nav_date(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:
             data_dir = Path(tmp) / "data"
             rows, _ = parse_nav_text(
@@ -283,68 +297,103 @@ class FetchAndUpdateTests(unittest.TestCase):
                     ]
                 )
             )
-
             seen_on = date(2026, 4, 2)
             csv_path = write_daily_run_csv(data_dir, rows, seen_on)
 
-            expected_path = data_dir / "2026" / "04" / "nav_2026-04-02.csv.gz"
+            # Snapshot is named by newest NAV date, not the run date.
+            expected_path = data_dir / "2026" / "04" / "nav_2026-04-01.csv.gz"
             self.assertEqual(csv_path, expected_path)
             self.assertTrue(expected_path.exists())
 
             with gzip.open(csv_path, "rt", newline="", encoding="utf-8") as handle:
                 csv_rows = list(csv.reader(handle))
 
-            self.assertEqual(csv_rows[0], [
-                "scheme_code",
-                "nav",
-                "nav_date",
-            ])
+            self.assertEqual(csv_rows[0], ["scheme_code", "nav", "nav_date"])
             self.assertEqual(len(csv_rows), 3)
             self.assertEqual(csv_rows[1][0], "100001")
             self.assertEqual(csv_rows[1][1], "10.0000")
+            self.assertEqual(csv_rows[1][2], "2026-04-01")
 
-    def test_latest_csv_contains_full_metadata_columns(self) -> None:
-        with WorkspaceTemporaryDirectory() as tmp:
-            latest_csv = Path(tmp) / "latest_nav.csv"
-            rows, _ = parse_nav_text(sample_line())
-
-            write_latest_csv(latest_csv, rows)
-
-            with latest_csv.open(newline="", encoding="utf-8") as handle:
-                csv_rows = list(csv.reader(handle))
-
-            self.assertEqual(
-                csv_rows[0],
-                ["scheme_code", "isin_payout_or_growth", "isin_reinvestment", "scheme_name", "nav", "nav_date"],
-            )
-            self.assertEqual(csv_rows[1], ["100001", "INF000000001", "", "Example Fund - Growth", "12.3456", "2026-04-01"])
-
-    def test_schemes_csv_contains_dimension_columns(self) -> None:
+    def test_weekend_rerun_produces_identical_snapshot_bytes(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:
             data_dir = Path(tmp) / "data"
-            schemes_csv = data_dir / "schemes.csv"
-            rows, _ = parse_nav_text(sample_line(100001, "Scheme Dimension Fund", "10.00", "01-Apr-2026"))
+            friday_rows, _ = parse_nav_text(sample_line(100001, "Fund", "10.00", "03-Apr-2026"))
+            saturday_rows, _ = parse_nav_text(sample_line(100001, "Fund", "10.00", "03-Apr-2026"))
 
-            update_databases(rows, date(2026, 4, 2), data_dir)
-            write_schemes_csv(data_dir / "nav_fy_2026_27.db", schemes_csv)
+            first = write_daily_run_csv(data_dir, friday_rows, date(2026, 4, 3))
+            first_bytes = first.read_bytes()
+            second = write_daily_run_csv(data_dir, saturday_rows, date(2026, 4, 4))
 
-            with schemes_csv.open(newline="", encoding="utf-8") as handle:
-                csv_rows = list(csv.reader(handle))
+            self.assertEqual(first, second)
+            self.assertEqual(second.read_bytes(), first_bytes)
+            siblings = list((data_dir / "2026" / "04").glob("nav_*.csv.gz"))
+            self.assertEqual(len(siblings), 1, "weekend rerun must not create a second snapshot")
 
-            self.assertEqual(
-                csv_rows[0],
-                [
-                    "scheme_code",
-                    "isin_payout_or_growth",
-                    "isin_reinvestment",
-                    "scheme_name",
-                    "first_seen_date",
-                    "last_seen_date",
-                    "is_active",
-                ],
+    def test_publish_artifacts_writes_pointer_and_merged_schemes(self) -> None:
+        with WorkspaceTemporaryDirectory() as tmp:
+            data_dir = Path(tmp) / "data"
+
+            fy26_rows, _ = parse_nav_text(sample_line(100001, "Retired Scheme", "10.00", "01-Apr-2026"))
+            update_databases(fy26_rows, date(2026, 4, 1), data_dir)
+            # Simulate a rollover: FY27 db only knows the new scheme.
+            fy27_rows, _ = parse_nav_text(sample_line(200001, "New FY Scheme", "30.00", "01-Apr-2027"))
+            update_databases(fy27_rows, date(2027, 4, 1), data_dir)
+
+            publish_artifacts(fy27_rows, date(2027, 4, 1), data_dir)
+
+            pointer = json.loads((data_dir / "latest.json").read_text(encoding="utf-8"))
+            self.assertEqual(pointer["date"], "2027-04-01")
+            self.assertEqual(pointer["file"], "2027/04/nav_2027-04-01.csv.gz")
+            self.assertEqual(pointer["schemes"], 1)
+
+            with gzip.open(data_dir / "schemes.json.gz", "rt", encoding="utf-8") as handle:
+                schemes_map = json.load(handle)
+
+            # Retired scheme from the previous FY survives the rollover.
+            self.assertIn("100001", schemes_map)
+            self.assertEqual(schemes_map["100001"][2], "Retired Scheme")
+            self.assertIn("200001", schemes_map)
+
+    def test_fy_paths_cover_scope_through_seen_on(self) -> None:
+        self.assertEqual(fy_start_years_through(date(2026, 8, 21)), [2026])
+        self.assertEqual(fy_start_years_through(date(2027, 4, 2)), [2026, 2027])
+        self.assertEqual(fy_start_years_through(date(2027, 3, 31)), [2026])
+
+        paths = all_fy_db_paths(date(2027, 4, 2), Path("data"))
+        self.assertEqual(
+            [p.name for p in paths],
+            ["nav_fy_2026_27.db", "nav_fy_2027_28.db"],
+        )
+
+    def test_write_schemes_json_merges_partitions_newest_wins(self) -> None:
+        with WorkspaceTemporaryDirectory() as tmp:
+            data_dir = Path(tmp) / "data"
+
+            dir26 = data_dir / "p26"
+            dir26.mkdir(parents=True, exist_ok=True)
+            rows_a, _ = parse_nav_text(
+                "\n".join(
+                    [
+                        sample_line(100001, "Shared Old", "10.00", "05-Jan-2027"),
+                        sample_line(300001, "Retired Only", "11.00", "05-Jan-2027"),
+                    ]
+                )
             )
-            self.assertEqual(csv_rows[1][0], "100001")
-            self.assertEqual(csv_rows[1][3], "Scheme Dimension Fund")
+            update_databases(rows_a, date(2027, 1, 5), dir26)
+
+            dir27 = data_dir / "p27"
+            dir27.mkdir(parents=True, exist_ok=True)
+            rows_b, _ = parse_nav_text(sample_line(100001, "Shared New", "12.00", "05-Jun-2027"))
+            update_databases(rows_b, date(2027, 6, 5), dir27)
+
+            target = data_dir / "schemes.json.gz"
+            write_schemes_json(sorted(dir26.glob("*.db")) + sorted(dir27.glob("*.db")), target)
+
+            with gzip.open(target, "rt", encoding="utf-8") as handle:
+                schemes_map = json.load(handle)
+
+            self.assertEqual(schemes_map["100001"][2], "Shared New")
+            self.assertIn("300001", schemes_map)
 
     def test_existing_real_nav_column_is_migrated_to_text(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:
@@ -420,6 +469,59 @@ class FetchAndUpdateTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 sync_up_databases_to_r2(db_hashes, data_dir, config)
 
+    def test_fresh_fy_partition_db_is_uploaded_on_first_sync(self) -> None:
+        """Regression: a partition created by this run must reach R2.
+
+        The baseline hash for a not-yet-existing database is "", so it must
+        still be present in db_hashes and uploaded after creation.
+        """
+        with WorkspaceTemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            data_dir = tmp_path / "data"
+            fixture = tmp_path / "feed.txt"
+            fixture.write_text(
+                sample_line(100001, "New FY Fund", "25.00", "01-Apr-2027"),
+                encoding="utf-8",
+            )
+
+            env = {
+                "R2_ACCOUNT_ID": "account123",
+                "R2_BUCKET": "nav-archive",
+                "R2_ACCESS_KEY_ID": "access",
+                "R2_SECRET_ACCESS_KEY": "secret",
+            }
+
+            @contextmanager
+            def fake_lock(config, key="lock/nav.lock", stale_after_seconds=3600):
+                yield
+
+            with (
+                patch.dict(os.environ, env),
+                patch("scripts.fetch_and_update.r2_lock", fake_lock),
+                patch("scripts.fetch_and_update.download_object", return_value=False) as dl,
+                patch("scripts.fetch_and_update.atomic_upload_object") as upload,
+            ):
+                from scripts.fetch_and_update import main
+
+                exit_code = main(
+                    [
+                        "--r2-sync",
+                        "--input", str(fixture),
+                        "--data-dir", str(data_dir),
+                        "--env-file", str(tmp_path / "missing.env"),
+                        "--seen-on", "2027-04-02",
+                        "--log-file", str(tmp_path / "log.txt"),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue((data_dir / "nav_fy_2027_28.db").exists())
+            self.assertTrue(dl.called)
+            upload.assert_called_once()
+            config_arg, key_arg = upload.call_args.args[0], upload.call_args.args[1]
+            self.assertEqual(key_arg, "db/nav_fy_2027_28.db")
+            self.assertEqual(config_arg.bucket, "nav-archive")
+
     def test_parses_dynamic_seven_and_nine_column_layouts(self) -> None:
         text_9col = "\n".join(
             [
@@ -448,7 +550,6 @@ class FetchAndUpdateTests(unittest.TestCase):
         self.assertEqual(rows_7[0].nav_date, date(2026, 8, 20))
 
     def test_parses_shuffled_column_layout(self) -> None:
-        # Shuffled: Scheme Code, ISIN, Date, NAV, Scheme Name
         text_shuffled = "119551;INF209KA12Z1;20-Aug-2026;106.9996;Aditya Birla Sun Life Banking Fund"
         rows, invalid, layouts = parse_nav_feed(text_shuffled)
         self.assertEqual(invalid, 0)
@@ -460,41 +561,45 @@ class FetchAndUpdateTests(unittest.TestCase):
         self.assertEqual(rows[0].nav_date, date(2026, 8, 20))
 
     def test_unparseable_low_confidence_layout_fails_loudly(self) -> None:
-        sample_unparseable = [
-            ["foo", "bar", "baz", "qux", "quux"]
-        ]
+        sample_unparseable = [["foo", "bar", "baz", "qux", "quux"]]
         with self.assertRaises(ValueError):
             detect_feed_layout(sample_unparseable, 5)
 
-    def test_feed_profile_saved_and_drift_detected(self) -> None:
+    def test_drift_check_does_not_persist_until_saved(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:
             data_dir = Path(tmp) / "data"
             layout_6col = {6: ColumnMap(0, 1, 2, 3, 4, 5, "6col_legacy", 1.0)}
             layout_8col = {8: ColumnMap(0, 1, 2, 3, 6, 7, "8col_standard", 1.0)}
 
-            # First run: writes profile, no drift detected
-            drift = check_and_update_feed_profile(layout_6col, 100, date(2026, 4, 1), data_dir)
-            self.assertFalse(drift)
             profile_file = data_dir / ".feed_profile.json"
+            self.assertFalse(profile_file.exists())
+            drift = check_feed_drift(layout_6col, data_dir)
+            self.assertFalse(drift)
+            self.assertFalse(profile_file.exists(), "drift check alone must not write the profile")
+
+            save_feed_profile(layout_6col, 100, date(2026, 4, 1), data_dir)
             self.assertTrue(profile_file.exists())
             profile_data = json.loads(profile_file.read_text(encoding="utf-8"))
             self.assertIn("6", profile_data["layouts"])
 
-            # Second run: layout shifts to 8-col -> drift detected
-            drift_2 = check_and_update_feed_profile(layout_8col, 100, date(2026, 8, 20), data_dir)
+            drift_2 = check_feed_drift(layout_8col, data_dir)
             self.assertTrue(drift_2)
+            still = json.loads(profile_file.read_text(encoding="utf-8"))
+            self.assertIn("6", still["layouts"], "failed run must not overwrite the saved profile")
 
-            # Strict mode test without allow flag raises RuntimeError
             with self.assertRaises(RuntimeError):
-                check_and_update_feed_profile(layout_6col, 100, date(2026, 8, 21), data_dir, strict_drift=True)
+                check_feed_drift(layout_8col, data_dir, strict_drift=True)
+
+            acknowledged = check_feed_drift(layout_8col, data_dir, allow_feed_drift=True, strict_drift=True)
+            self.assertTrue(acknowledged)
 
     def test_row_count_sanity_gate(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:
             data_dir = Path(tmp) / "data"
             db_path = data_dir / "nav_fy_2026_27.db"
-            
-            # Setup database with 7 days of 1000 rows each
+
             from scripts.fetch_and_update import init_db
+
             init_db(db_path)
             with closing(sqlite3.connect(db_path)) as conn:
                 for d in range(1, 8):
@@ -502,36 +607,33 @@ class FetchAndUpdateTests(unittest.TestCase):
                     for s in range(1001, 2001):
                         conn.execute(
                             "INSERT OR IGNORE INTO schemes (scheme_code, scheme_name, first_seen_date, last_seen_date) VALUES (?, 'Test', ?, ?)",
-                            (s, dt_str, dt_str)
+                            (s, dt_str, dt_str),
                         )
                         conn.execute(
                             "INSERT OR IGNORE INTO nav_history (scheme_code, nav_date, nav) VALUES (?, ?, '10.0000')",
-                            (s, dt_str)
+                            (s, dt_str),
                         )
                 conn.commit()
 
-            # 900 rows parsed (> 80% of 1000 median) -> PASS
             check_row_count_plausibility(900, data_dir, min_ratio=0.80)
 
-            # 700 rows parsed (< 80% of 1000 median) -> FAIL
             with self.assertRaises(RuntimeError) as ctx:
                 check_row_count_plausibility(700, data_dir, min_ratio=0.80)
             self.assertIn("Row count sanity gate failed", str(ctx.exception))
 
     def test_stale_feed_warning(self) -> None:
-        rows = [
-            NavRow(100001, None, None, "Test", Decimal("10.00"), date(2026, 8, 1))
-        ]
+        rows = [NavRow(100001, None, None, "Test", Decimal("10.00"), date(2026, 8, 1))]
         check_stale_feed(rows, date(2026, 8, 11), max_stale_days=4)
 
     @unittest.skipUnless(os.environ.get("LIVE_FEED") == "1", "Requires LIVE_FEED=1")
     def test_live_amfi_canary(self) -> None:
         from scripts.fetch_and_update import fetch_text
+
         text = fetch_text("https://portal.amfiindia.com/spages/NAVAll.txt")
         rows, invalid, layouts = parse_nav_feed(text)
         self.assertGreater(len(rows), 5000, "Expected > 5,000 schemes in real AMFI feed")
         self.assertLess(invalid, len(rows) * 0.05, "Invalid rows should be < 5% of feed")
-        self.assertTrue(len(layouts) > 0, "Expected at least 1 detected layout")
+        self.assertGreater(len(layouts), 0, "Expected at least 1 detected layout")
 
 
 if __name__ == "__main__":

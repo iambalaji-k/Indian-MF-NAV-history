@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import gzip
+import io
 import json
 import logging
 import re
@@ -13,7 +14,7 @@ import urllib.error
 import urllib.request
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 
@@ -38,9 +39,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT_DIR / "data"
 LOG_DIR = ROOT_DIR / "logs"
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
-LATEST_CSV = ROOT_DIR / "latest_nav.csv"
-SCHEMES_CSV = DATA_DIR / "schemes.csv"
 NAV_QUANT = Decimal("0.0001")
+IST = timezone(timedelta(hours=5, minutes=30))
 
 SCHEME_LINE_RE = re.compile(r"^\s*\d+\s*;")
 
@@ -134,6 +134,8 @@ def normalize_nav(value: str) -> Decimal:
     nav = Decimal(value).quantize(NAV_QUANT, rounding=ROUND_HALF_UP)
     if nav.is_nan() or nav.is_infinite():
         raise InvalidOperation("NAV is not finite")
+    if nav <= 0:
+        raise InvalidOperation("NAV must be positive")
     return nav
 
 
@@ -375,16 +377,8 @@ def check_stale_feed(rows: list[NavRow], seen_on: date, max_stale_days: int = 4)
         )
 
 
-def check_and_update_feed_profile(
-    layouts: dict[int, ColumnMap],
-    total_rows: int,
-    seen_on: date,
-    data_dir: Path,
-    allow_feed_drift: bool = False,
-    strict_drift: bool = False,
-) -> bool:
-    profile_path = data_dir / FEED_PROFILE_FILE
-    current_profile_layouts = {
+def profile_layout_payload(layouts: dict[int, ColumnMap]) -> dict:
+    return {
         str(col_count): {
             "layout_name": cm.layout_name,
             "col_count": col_count,
@@ -398,6 +392,22 @@ def check_and_update_feed_profile(
         }
         for col_count, cm in layouts.items()
     }
+
+
+def check_feed_drift(
+    layouts: dict[int, ColumnMap],
+    data_dir: Path,
+    allow_feed_drift: bool = False,
+    strict_drift: bool = False,
+) -> bool:
+    """Compare detected layouts against the saved profile without mutating it.
+
+    Returns True when drift was detected. Raises under strict mode unless the
+    drift is explicitly acknowledged. Persistence is deferred to
+    save_feed_profile so a failed run cannot erase an unacknowledged alarm.
+    """
+    profile_path = data_dir / FEED_PROFILE_FILE
+    current_profile_layouts = profile_layout_payload(layouts)
 
     drift_detected = False
     if profile_path.exists():
@@ -418,19 +428,26 @@ def check_and_update_feed_profile(
         except json.JSONDecodeError:
             logging.warning("Failed to parse existing %s, will overwrite.", profile_path)
 
+    return drift_detected
+
+
+def save_feed_profile(
+    layouts: dict[int, ColumnMap],
+    total_rows: int,
+    seen_on: date,
+    data_dir: Path,
+) -> None:
     new_profile = {
         "last_updated": seen_on.isoformat(),
         "total_rows": total_rows,
-        "layouts": current_profile_layouts,
+        "layouts": profile_layout_payload(layouts),
     }
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
-        profile_path.write_text(json.dumps(new_profile, indent=2), encoding="utf-8")
-        logging.info("Saved feed profile to %s", profile_path)
+        (data_dir / FEED_PROFILE_FILE).write_text(json.dumps(new_profile, indent=2), encoding="utf-8")
+        logging.info("Saved feed profile to %s", data_dir / FEED_PROFILE_FILE)
     except OSError as exc:
-        logging.warning("Could not write feed profile to %s: %s", profile_path, exc)
-
-    return drift_detected
+        logging.warning("Could not write feed profile to %s: %s", data_dir / FEED_PROFILE_FILE, exc)
 
 
 def get_recent_daily_row_counts(data_dir: Path, limit: int = 7) -> list[int]:
@@ -628,25 +645,8 @@ def upsert_rows(db_path: Path, rows: list[NavRow], seen_on: date) -> tuple[int, 
     return inserted, active_count
 
 
-def write_latest_csv(path: Path, rows: list[NavRow]) -> None:
-    sorted_rows = sorted(rows, key=lambda row: (row.scheme_code, row.nav_date))
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(LATEST_NAV_CSV_HEADER)
-        for row in sorted_rows:
-            writer.writerow(
-                [
-                    row.scheme_code,
-                    row.isin_payout_or_growth or "",
-                    row.isin_reinvestment or "",
-                    row.scheme_name,
-                    format_nav(row.nav),
-                    row.nav_date.isoformat(),
-                ]
-            )
-
-
 SCHEMES_JSON_GZ = DATA_DIR / "schemes.json.gz"
+LATEST_JSON = DATA_DIR / "latest.json"
 
 NAV_CSV_HEADER = [
     "scheme_code",
@@ -654,66 +654,116 @@ NAV_CSV_HEADER = [
     "nav_date",
 ]
 
-LATEST_NAV_CSV_HEADER = [
-    "scheme_code",
-    "isin_payout_or_growth",
-    "isin_reinvestment",
-    "scheme_name",
-    "nav",
-    "nav_date",
-]
 
-SCHEME_CSV_HEADER = [
-    "scheme_code",
-    "isin_payout_or_growth",
-    "isin_reinvestment",
-    "scheme_name",
-    "first_seen_date",
-    "last_seen_date",
-    "is_active",
-]
+def deterministic_gzip_bytes(text: str) -> bytes:
+    """GZIP with a fixed mtime so identical content yields identical bytes."""
+    buffer = io.BytesIO()
+    with gzip.GzipFile(fileobj=buffer, mode="wb", compresslevel=9, mtime=0) as gz:
+        gz.write(text.encode("utf-8"))
+    return buffer.getvalue()
+
+
+def write_bytes_if_changed(path: Path, payload: bytes) -> bool:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.read_bytes() == payload:
+        return False
+    path.write_bytes(payload)
+    return True
 
 
 def write_daily_run_csv(data_dir: Path, rows: list[NavRow], seen_on: date) -> Path:
-    year = seen_on.year
-    month = f"{seen_on.month:02d}"
-    folder = data_dir / str(year) / month
-    folder.mkdir(parents=True, exist_ok=True)
-    csv_path = folder / f"nav_{seen_on.isoformat()}.csv.gz"
+    if not rows:
+        raise ValueError("No NAV rows available to snapshot")
 
-    sorted_rows = sorted(rows, key=lambda row: (row.scheme_code, row.nav_date))
-    with gzip.open(csv_path, "wt", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(NAV_CSV_HEADER)
-        for row in sorted_rows:
-            writer.writerow(
-                [
-                    row.scheme_code,
-                    format_nav(row.nav),
-                    row.nav_date.isoformat(),
-                ]
-            )
-    logging.info("Wrote daily run CSV: %s", csv_path)
+    # Name the snapshot by the newest NAV date in the feed. Weekend/holiday
+    # runs then reuse the last trading day's filename; combined with
+    # deterministic GZIP output this makes repeat runs byte-identical no-ops
+    # for Git instead of duplicating snapshots.
+    snapshot_date = max(row.nav_date for row in rows)
+    year = snapshot_date.year
+    month = f"{snapshot_date.month:02d}"
+    folder = data_dir / str(year) / month
+    csv_path = folder / f"nav_{snapshot_date.isoformat()}.csv.gz"
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\r\n")
+    writer.writerow(NAV_CSV_HEADER)
+    for row in sorted(rows, key=lambda r: (r.scheme_code, r.nav_date)):
+        writer.writerow(
+            [
+                row.scheme_code,
+                format_nav(row.nav),
+                row.nav_date.isoformat(),
+            ]
+        )
+
+    payload = deterministic_gzip_bytes(buffer.getvalue())
+    changed = write_bytes_if_changed(csv_path, payload)
+    logging.info(
+        "%s daily run CSV: %s", "Wrote" if changed else "Skipped (unchanged)", csv_path
+    )
     return csv_path
 
 
-def write_schemes_json(db_path: Path, target_path: Path = SCHEMES_JSON_GZ) -> None:
+def write_latest_json(
+    data_dir: Path,
+    csv_path: Path,
+    snapshot_date: date,
+    scheme_count: int,
+) -> None:
+    relative = csv_path.relative_to(data_dir).as_posix() if csv_path.is_relative_to(data_dir) else csv_path.name
+    pointer = {
+        "date": snapshot_date.isoformat(),
+        "file": relative,
+        "schemes": scheme_count,
+    }
+    payload = json.dumps(pointer, separators=(",", ":")) + "\n"
+    write_bytes_if_changed(data_dir / "latest.json", payload.encode("utf-8"))
+
+
+def write_schemes_json(db_paths: list[Path], target_path: Path = SCHEMES_JSON_GZ) -> None:
+    """Merge scheme master data across financial-year partitions.
+
+    Later (newer) databases win on conflicts so renames propagate, while
+    schemes retired in an older FY remain visible instead of vanishing at
+    the April rollover.
+    """
     target_path.parent.mkdir(parents=True, exist_ok=True)
     schemes_dict: dict[str, list[str]] = {}
-    with closing(sqlite3.connect(db_path)) as conn:
-        for row in conn.execute(
-            """
-            SELECT scheme_code, isin_payout_or_growth, isin_reinvestment, scheme_name
-            FROM schemes
-            ORDER BY scheme_code
-            """
-        ):
-            code, isin1, isin2, name = row
-            schemes_dict[str(code)] = [isin1 or "", isin2 or "", name]
+    for db_path in db_paths:
+        if not db_path.exists():
+            continue
+        with closing(sqlite3.connect(db_path)) as conn:
+            for row in conn.execute(
+                """
+                SELECT scheme_code, isin_payout_or_growth, isin_reinvestment, scheme_name
+                FROM schemes
+                ORDER BY scheme_code
+                """
+            ):
+                code, isin1, isin2, name = row
+                schemes_dict[str(code)] = [isin1 or "", isin2 or "", name]
 
-    with gzip.open(target_path, "wt", encoding="utf-8") as handle:
-        json.dump(schemes_dict, handle, ensure_ascii=False)
-    logging.info("Wrote schemes JSON GZIP map: %s (%s schemes)", target_path, len(schemes_dict))
+    payload = json.dumps(schemes_dict, ensure_ascii=False, separators=(",", ":"))
+    changed = write_bytes_if_changed(target_path, deterministic_gzip_bytes(payload))
+    logging.info(
+        "%s schemes JSON GZIP map: %s (%s schemes)",
+        "Wrote" if changed else "Skipped (unchanged)",
+        target_path,
+        len(schemes_dict),
+    )
+
+
+def fy_start_years_through(seen_on: date) -> list[int]:
+    last_start_year = seen_on.year if seen_on.month >= 4 else seen_on.year - 1
+    return list(range(MIN_NAV_DATE.year, last_start_year + 1))
+
+
+def all_fy_db_paths(seen_on: date, data_dir: Path = DATA_DIR) -> list[Path]:
+    return [
+        data_dir / f"nav_fy_{start_year}_{str(start_year + 1)[-2:]}.db"
+        for start_year in fy_start_years_through(seen_on)
+    ]
 
 
 def db_paths_for_rows(rows: list[NavRow], data_dir: Path = DATA_DIR) -> set[Path]:
@@ -745,28 +795,6 @@ def sync_up_databases_to_r2(db_hashes: dict[Path, str], data_dir: Path, config: 
         atomic_upload_object(config, r2_key_for_db(db_path, data_dir), db_path, rotate_backups=True)
 
 
-def write_schemes_csv(db_path: Path, csv_path: Path = SCHEMES_CSV) -> None:
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    with closing(sqlite3.connect(db_path)) as conn, csv_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(SCHEME_CSV_HEADER)
-        for row in conn.execute(
-            """
-            SELECT
-                scheme_code,
-                COALESCE(isin_payout_or_growth, ''),
-                COALESCE(isin_reinvestment, ''),
-                scheme_name,
-                first_seen_date,
-                last_seen_date,
-                is_active
-            FROM schemes
-            ORDER BY scheme_code
-            """
-        ):
-            writer.writerow(row)
-
-
 def update_databases(rows: list[NavRow], seen_on: date, data_dir: Path = DATA_DIR) -> set[Path]:
     rows_by_db: dict[Path, list[NavRow]] = {}
     for row in rows:
@@ -790,8 +818,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--url", default=AMFI_URL)
     parser.add_argument("--input", help="Read AMFI text from a local fixture instead of fetching.")
     parser.add_argument("--data-dir", type=Path, default=DATA_DIR)
-    parser.add_argument("--latest-csv", type=Path, default=LATEST_CSV)
-    parser.add_argument("--schemes-csv", type=Path, default=SCHEMES_CSV)
     parser.add_argument("--log-file", type=Path, default=LOG_DIR / "update.log")
     parser.add_argument("--seen-on", help="Override ingestion date as YYYY-MM-DD, mainly for tests.")
     parser.add_argument("--retries", type=int, default=3)
@@ -804,10 +830,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def publish_artifacts(rows: list[NavRow], seen_on: date, data_dir: Path) -> None:
+    csv_path = write_daily_run_csv(data_dir, rows, seen_on)
+    snapshot_date = max(row.nav_date for row in rows)
+    write_latest_json(
+        data_dir,
+        csv_path,
+        snapshot_date=snapshot_date,
+        scheme_count=len({row.scheme_code for row in rows}),
+    )
+    write_schemes_json(all_fy_db_paths(seen_on, data_dir), target_path=data_dir / "schemes.json.gz")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     setup_logging(args.log_file)
-    seen_on = date.fromisoformat(args.seen_on) if args.seen_on else date.today()
+    seen_on = date.fromisoformat(args.seen_on) if args.seen_on else datetime.now(IST).date()
 
     try:
         load_dotenv(args.env_file)
@@ -821,10 +859,11 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         check_stale_feed(rows, seen_on)
-        check_and_update_feed_profile(
+        # Detect drift up front (strict mode aborts here), but only persist
+        # the new profile after the pipeline succeeds so a failed run cannot
+        # silently erase an unacknowledged drift alarm.
+        check_feed_drift(
             detected_layouts,
-            len(rows),
-            seen_on,
             args.data_dir,
             allow_feed_drift=args.allow_feed_drift,
             strict_drift=args.strict_feed_drift,
@@ -834,28 +873,26 @@ def main(argv: list[str] | None = None) -> int:
         r2_config = R2Config.from_env() if args.r2_sync else None
         if r2_config:
             with r2_lock(r2_config):
-                sync_down_databases_from_r2(db_paths, args.data_dir, r2_config)
+                # Download every financial-year partition through seen_on so
+                # schemes.json.gz can merge scheme master data across FYs.
+                sync_down_databases_from_r2(set(all_fy_db_paths(seen_on, args.data_dir)), args.data_dir, r2_config)
                 if not args.skip_sanity and args.input is None:
                     check_row_count_plausibility(len(rows), args.data_dir)
+                # Hash every rows-derived partition even when it does not
+                # exist yet: file_sha256 returns "" for missing files, so a
+                # freshly created financial-year database still differs from
+                # its baseline hash and gets uploaded after the update.
                 db_hashes = {path: file_sha256(path) for path in db_paths}
                 update_databases(rows, seen_on, args.data_dir)
-                write_daily_run_csv(args.data_dir, rows, seen_on)
-                schemes_source_db = fy_db_path(seen_on, args.data_dir)
-                if not schemes_source_db.exists() and db_paths:
-                    schemes_source_db = sorted(db_paths)[0]
-                if schemes_source_db.exists():
-                    write_schemes_json(schemes_source_db, args.data_dir / "schemes.json.gz")
+                publish_artifacts(rows, seen_on, args.data_dir)
                 sync_up_databases_to_r2(db_hashes, args.data_dir, r2_config)
         else:
             if not args.skip_sanity and args.input is None:
                 check_row_count_plausibility(len(rows), args.data_dir)
             update_databases(rows, seen_on, args.data_dir)
-            write_daily_run_csv(args.data_dir, rows, seen_on)
-            schemes_source_db = fy_db_path(seen_on, args.data_dir)
-            if not schemes_source_db.exists() and db_paths:
-                schemes_source_db = sorted(db_paths)[0]
-            if schemes_source_db.exists():
-                write_schemes_json(schemes_source_db, args.data_dir / "schemes.json.gz")
+            publish_artifacts(rows, seen_on, args.data_dir)
+
+        save_feed_profile(detected_layouts, len(rows), seen_on, args.data_dir)
     except Exception:
         logging.exception("NAV update failed")
         return 1

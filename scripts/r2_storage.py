@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import logging
 import os
+import random
 import time
 import urllib.error
 import urllib.parse
@@ -152,6 +153,7 @@ def run_with_retries(operation_name: str, operation, retries: int = 3, base_dela
         try:
             return operation()
         except urllib.error.HTTPError as exc:
+            exc.close()
             if exc.code in {400, 401, 403, 404, 409, 412}:
                 raise
             last_error = exc
@@ -160,7 +162,7 @@ def run_with_retries(operation_name: str, operation, retries: int = 3, base_dela
 
         logging.warning("%s attempt %s/%s failed: %s", operation_name, attempt, retries, last_error)
         if attempt < retries:
-            time.sleep(base_delay * attempt)
+            time.sleep(base_delay * (2 ** (attempt - 1)) + random.uniform(0.0, base_delay))
 
     raise RuntimeError(f"{operation_name} failed after {retries} attempts") from last_error
 
@@ -169,12 +171,29 @@ def download_object(config: R2Config, key: str, destination: Path, retries: int 
     def operation() -> bool:
         request = signed_request(config, "GET", key)
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                expected_hash = response.headers.get("x-amz-meta-sha256")
+                hasher = hashlib.sha256()
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes(response.read())
+                temp_destination = destination.with_name(destination.name + ".part")
+                try:
+                    with temp_destination.open("wb") as handle:
+                        for chunk in iter(lambda: response.read(65536), b""):
+                            hasher.update(chunk)
+                            handle.write(chunk)
+                    actual_hash = hasher.hexdigest()
+                    if expected_hash and actual_hash != expected_hash:
+                        raise RuntimeError(
+                            f"Checksum mismatch for {key}: expected {expected_hash}, got {actual_hash}"
+                        )
+                    temp_destination.replace(destination)
+                except Exception:
+                    temp_destination.unlink(missing_ok=True)
+                    raise
             logging.info("Downloaded r2://%s/%s to %s", config.bucket, config.object_key(key), destination)
             return True
         except urllib.error.HTTPError as exc:
+            exc.close()
             if exc.code == 404:
                 logging.info("R2 object does not exist yet: r2://%s/%s", config.bucket, config.object_key(key))
                 return False
@@ -183,11 +202,13 @@ def download_object(config: R2Config, key: str, destination: Path, retries: int 
     return run_with_retries(f"Download {key}", operation, retries=retries)
 
 
-def upload_object(config: R2Config, key: str, source: Path, retries: int = 3) -> None:
+def upload_object(config: R2Config, key: str, source: Path, retries: int = 3, extra_headers: dict[str, str] | None = None) -> None:
     payload = source.read_bytes()
+    headers = dict(extra_headers or {})
+    headers.setdefault("x-amz-meta-sha256", sha256_hex(payload))
 
     def operation() -> None:
-        request = signed_request(config, "PUT", key, payload)
+        request = signed_request(config, "PUT", key, payload, extra_headers=headers)
         with urllib.request.urlopen(request, timeout=60) as response:
             response.read()
         logging.info("Uploaded %s to r2://%s/%s", source, config.bucket, config.object_key(key))
@@ -218,6 +239,7 @@ def head_object(config: R2Config, key: str, retries: int = 3) -> bool:
                 response.read()
             return True
         except urllib.error.HTTPError as exc:
+            exc.close()
             if exc.code == 404:
                 return False
             raise
@@ -232,6 +254,7 @@ def delete_object(config: R2Config, key: str, retries: int = 3) -> None:
             with urllib.request.urlopen(request, timeout=30) as response:
                 response.read()
         except urllib.error.HTTPError as exc:
+            exc.close()
             if exc.code != 404:
                 raise
 
@@ -260,6 +283,7 @@ def copy_object(config: R2Config, source_key: str, destination_key: str, retries
             )
             return True
         except urllib.error.HTTPError as exc:
+            exc.close()
             if exc.code == 404:
                 logging.info("R2 source object missing, skipping copy: r2://%s/%s", config.bucket, config.object_key(source_key))
                 return False
@@ -301,16 +325,61 @@ def atomic_upload_object(config: R2Config, key: str, source: Path, rotate_backup
     delete_object(config, temp_key)
 
 
-@contextmanager
-def r2_lock(config: R2Config, key: str = "lock/nav.lock"):
-    payload = datetime.now(timezone.utc).isoformat().encode("utf-8")
+LOCK_STALE_AFTER_SECONDS = 3600
+
+
+def _read_lock_timestamp(config: R2Config, key: str) -> datetime | None:
+    request = signed_request(config, "GET", key)
     try:
-        upload_bytes(config, key, payload, extra_headers={"if-none-match": "*"}, retries=1)
-        logging.info("Acquired R2 lock r2://%s/%s", config.bucket, config.object_key(key))
+        with urllib.request.urlopen(request, timeout=30) as response:
+            raw = response.read(256).decode("utf-8", errors="replace").strip()
     except urllib.error.HTTPError as exc:
-        if exc.code in {409, 412}:
-            raise RuntimeError(f"R2 lock already exists: {key}") from exc
+        exc.close()
+        if exc.code == 404:
+            return None
         raise
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def acquire_r2_lock(config: R2Config, key: str = "lock/nav.lock", stale_after_seconds: int = LOCK_STALE_AFTER_SECONDS) -> None:
+    payload = datetime.now(timezone.utc).isoformat().encode("utf-8")
+    max_attempts = 2
+    for attempt in range(1, max_attempts + 1):
+        try:
+            upload_bytes(config, key, payload, extra_headers={"if-none-match": "*"}, retries=1)
+            logging.info("Acquired R2 lock r2://%s/%s", config.bucket, config.object_key(key))
+            return
+        except urllib.error.HTTPError as exc:
+            exc.close()
+            if exc.code not in {409, 412}:
+                raise
+            if attempt == max_attempts:
+                break
+        lock_time = _read_lock_timestamp(config, key)
+        lock_age = (datetime.now(timezone.utc) - lock_time).total_seconds() if lock_time else None
+        if lock_age is None or lock_age <= stale_after_seconds:
+            break
+        logging.warning(
+            "Stale R2 lock detected: %s held for %.0fs (> %ss); taking over",
+            key,
+            lock_age,
+            stale_after_seconds,
+        )
+        delete_object(config, key)
+    raise RuntimeError(f"R2 lock already exists: {key}")
+
+
+@contextmanager
+def r2_lock(config: R2Config, key: str = "lock/nav.lock", stale_after_seconds: int = LOCK_STALE_AFTER_SECONDS):
+    acquire_r2_lock(config, key, stale_after_seconds=stale_after_seconds)
 
     try:
         yield

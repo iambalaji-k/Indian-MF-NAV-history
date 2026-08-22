@@ -3,214 +3,356 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com;
+        style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com;
+        font-src https://fonts.gstatic.com https://cdnjs.cloudflare.com data:;
+        img-src 'self' data:;
+        connect-src 'self';
+        object-src 'none';
+        base-uri 'self';
+        form-action 'none';
+    ">
     <title>Indian Mutual Fund NAV Explorer</title>
-    
-    <!-- Google Fonts & Tailwind CSS -->
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23E3A857'/%3E%3Ctext x='16' y='23' font-size='20' text-anchor='middle' fill='%23141210'%3E%E2%82%B9%3C/text%3E%3C/svg%3E">
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- Primary: Pre-compiled static stylesheet (16 KB, zero runtime JS evaluation) -->
+    <link rel="stylesheet" href="styles.min.css" onerror="loadTailwindFallback()">
+    <!-- Fallback: Load Tailwind Play CDN if styles.min.css is missing -->
     <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    fontFamily: {
-                        sans: ['Plus Jakarta Sans', 'sans-serif'],
-                        mono: ['JetBrains Mono', 'monospace'],
-                    }
-                }
-            }
+        function loadTailwindFallback() {
+            if (window._twFallbackLoaded) return;
+            window._twFallbackLoaded = true;
+            console.warn("styles.min.css not found, loading Tailwind Play CDN fallback...");
+            const script = document.createElement('script');
+            script.src = 'https://cdn.tailwindcss.com/3.4.16';
+            script.onload = () => {
+                tailwind.config = {
+                    darkMode: 'class',
+                    theme: {
+                        extend: {
+                            fontFamily: {
+                                sans: ['Instrument Sans', 'sans-serif'],
+                                mono: ['Spline Sans Mono', 'monospace'],
+                            },
+                            colors: {
+                                ink: {
+                                    DEFAULT: '#141210',
+                                    deep: '#100E0C',
+                                    raise: '#1C1915',
+                                    high: '#26221B',
+                                    line: '#2C2820',
+                                    linestrong: '#3E372C',
+                                },
+                                paper: {
+                                    DEFAULT: '#EDE8DC',
+                                    dim: '#A89F8F',
+                                    mute: '#776F61',
+                                },
+                                brass: {
+                                    DEFAULT: '#E3A857',
+                                    bright: '#F2BE6E',
+                                },
+                                money: {
+                                    DEFAULT: '#5BC48F',
+                                },
+                                alert: {
+                                    DEFAULT: '#E5695E',
+                                },
+                            },
+                        },
+                    },
+                };
+            };
+            document.head.appendChild(script);
         }
     </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous">
 
     <style>
         body {
-            background-color: #090d16;
-            color: #f1f5f9;
+            background-color: #100E0C;
+            color: #EDE8DC;
         }
-        .dark-glass {
-            background: rgba(15, 23, 42, 0.75);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
+
+        ::selection {
+            background: rgba(227, 168, 87, 0.32);
+            color: #141210;
         }
-        .autocomplete-dropdown::-webkit-scrollbar {
-            width: 6px;
+
+        :focus-visible {
+            outline: 2px solid #E3A857;
+            outline-offset: 2px;
         }
-        .autocomplete-dropdown::-webkit-scrollbar-track {
-            background: #0f172a; 
+
+        @keyframes rise-in {
+            from { opacity: 0; transform: translateY(6px); }
+            to   { opacity: 1; transform: translateY(0); }
         }
-        .autocomplete-dropdown::-webkit-scrollbar-thumb {
-            background: #334155; 
-            border-radius: 9999px;
+        .anim-rise {
+            animation: rise-in 180ms cubic-bezier(0.22, 0.9, 0.34, 1) both;
         }
-        .autocomplete-dropdown::-webkit-scrollbar-thumb:hover {
-            background: #475569; 
+        .opt-enter {
+            animation: rise-in 150ms ease-out both;
+        }
+
+        .option-row[aria-selected="true"] {
+            background-color: #26221B;
+            box-shadow: inset 2px 0 0 #E3A857;
+        }
+
+        mark {
+            background: rgba(227, 168, 87, 0.22);
+            color: #F2BE6E;
+            padding: 0 1px;
+            border-radius: 2px;
+            font-weight: 600;
+        }
+
+        .tnum {
+            font-variant-numeric: tabular-nums;
+        }
+
+        .skeleton-bar {
+            height: 14px;
+            border-radius: 4px;
+            background: linear-gradient(90deg, #1C1915 25%, #26221B 50%, #1C1915 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.2s linear infinite;
+        }
+        @keyframes shimmer {
+            to { background-position: -200% 0; }
+        }
+
+        .scheme-list::-webkit-scrollbar { width: 6px; }
+        .scheme-list::-webkit-scrollbar-track { background: #141210; }
+        .scheme-list::-webkit-scrollbar-thumb { background: #3E372C; border-radius: 9999px; }
+        .scheme-list::-webkit-scrollbar-thumb:hover { background: #55493A; }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+                scroll-behavior: auto !important;
+            }
         }
     </style>
 </head>
-<body class="bg-[#090d16] text-slate-100 font-sans antialiased min-h-screen flex flex-col selection:bg-sky-500 selection:text-white">
+<body class="bg-ink-deep text-paper font-sans antialiased min-h-screen flex flex-col">
 
-    <!-- Header -->
-    <header class="sticky top-0 z-40 dark-glass border-b border-slate-800/80 shadow-md">
-        <div class="w-full px-3 sm:px-8 h-16 flex items-center justify-between gap-2 sm:gap-4">
-            <!-- Brand / Logo -->
-            <a href="#" class="flex items-center gap-2 sm:gap-3 group shrink-0">
-                <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-gradient-to-br from-sky-400 to-blue-600 text-slate-950 flex items-center justify-center font-bold text-xs sm:text-sm shadow-md shadow-sky-500/20 group-hover:scale-105 transition-transform">
-                    <i class="fas fa-chart-line"></i>
-                </div>
-                <div class="flex items-center gap-1.5 sm:gap-2">
-                    <span class="text-sm sm:text-lg font-bold tracking-tight text-white whitespace-nowrap">Indian MF NAV</span>
-                    <span class="px-2 py-0.5 rounded-md bg-slate-800/90 text-slate-300 text-[10px] font-bold tracking-wider uppercase border border-slate-700/80 hidden md:inline-block">Explorer</span>
-                </div>
+    <!-- Masthead -->
+    <header class="sticky top-0 z-40 bg-ink-deep/95 backdrop-blur-sm border-b border-ink-line">
+        <div class="w-full px-4 sm:px-8 h-16 flex items-center justify-between gap-3">
+            <a href="#" class="flex items-center gap-3 group min-w-0">
+                <span class="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-md border border-brass/60 bg-brass/10 text-brass flex items-center justify-center font-bold text-base sm:text-lg leading-none" aria-hidden="true">₹</span>
+                <span class="flex items-baseline gap-2.5 min-w-0">
+                    <span class="text-base sm:text-lg font-bold tracking-tight text-paper truncate">Indian MF NAV</span>
+                    <span class="hidden md:inline-block text-[10px] font-semibold tracking-[0.18em] uppercase text-paper-mute border border-ink-line rounded px-1.5 py-0.5">Explorer</span>
+                </span>
             </a>
 
-            <!-- Right Controls: Status + Download Button -->
-            <div class="flex items-center gap-2 sm:gap-3 shrink-0">
-                <div id="last-updated" class="h-8 sm:h-9 px-2.5 sm:px-3 rounded-lg bg-slate-900 border border-slate-800 text-[10px] sm:text-xs font-mono font-medium text-slate-300 flex items-center gap-1.5 whitespace-nowrap">
-                    <span class="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                    Loading...
+            <div class="flex items-center gap-2 sm:gap-3 min-w-0">
+                <div id="last-updated" role="status" aria-live="polite"
+                     class="h-9 px-2 sm:px-3 rounded-md border border-ink-line bg-ink text-xs font-mono tnum text-paper-dim flex items-center gap-2 min-w-0">
+                    <span id="status-dot" class="w-1.5 h-1.5 rounded-full bg-brass animate-pulse shrink-0" aria-hidden="true"></span>
+                    <span id="status-text" class="truncate">Loading archive</span>
                 </div>
 
-                <a href="#" id="download-btn" download 
-                   class="h-8 sm:h-9 px-3 sm:px-4 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 text-[11px] sm:text-xs font-bold transition-all shadow-sm shadow-sky-500/20 flex items-center gap-1.5 whitespace-nowrap">
-                    <i class="fas fa-download text-[10px] sm:text-xs"></i> Download
+                <a href="#" id="download-btn" download aria-label="Download snapshot CSV" aria-disabled="true"
+                   class="h-10 px-2.5 sm:px-4 rounded-md bg-brass hover:bg-brass-bright active:scale-[0.98] text-ink-deep text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap opacity-40 pointer-events-none">
+                    <i class="fas fa-download text-[11px]" aria-hidden="true"></i> <span class="hidden sm:inline">Download</span>
                 </a>
             </div>
         </div>
     </header>
 
-    <!-- Main Container -->
-    <main class="flex-grow max-w-4xl w-full mx-auto px-3 sm:px-6 py-5 sm:py-8 flex flex-col gap-5 sm:gap-6">
-        
-        <!-- Search Section -->
-        <div class="bg-slate-900/90 rounded-2xl border border-slate-800 p-4 sm:p-6 shadow-xl relative">
-            
-            <!-- Search Bar Header -->
-            <div class="flex items-center justify-between gap-2 mb-2.5">
-                <label for="search-input" class="text-xs sm:text-sm font-semibold text-slate-300">
-                    Search Mutual Funds
+    <main class="flex-grow w-full max-w-5xl mx-auto px-4 sm:px-8 pt-10 sm:pt-14 pb-16 flex flex-col gap-8">
+
+        <!-- Command strip -->
+        <section aria-label="Search schemes">
+            <div class="flex items-end justify-between gap-4 mb-3">
+                <label for="search-input" class="text-[11px] font-semibold tracking-[0.16em] uppercase text-paper-mute">
+                    Look up a scheme
                 </label>
-                <span class="text-xs text-slate-500 font-mono hidden sm:inline-block">
-                    <kbd class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400">Ctrl</kbd> + <kbd class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400">K</kbd>
+                <span class="hidden md:inline-block text-xs text-paper-mute font-mono">
+                    <kbd class="px-1.5 py-0.5 rounded border border-ink-linestrong bg-ink-raise text-paper-dim text-[11px]">Ctrl</kbd>
+                    <span class="mx-1">+</span>
+                    <kbd class="px-1.5 py-0.5 rounded border border-ink-linestrong bg-ink-raise text-paper-dim text-[11px]">K</kbd>
                 </span>
             </div>
 
-            <!-- Search Input Box -->
+            <!-- Quick filters (real toggles) — placed above the input so an
+                 open suggestion dropdown can never cover or block them -->
+            <div class="mb-3 flex items-center gap-2 overflow-x-auto pb-1" role="group" aria-label="Quick filters">
+                <span class="text-[11px] tracking-[0.14em] uppercase text-paper-mute shrink-0 mr-1">Filter</span>
+                <button class="filter-chip shrink-0 min-h-[36px] px-3 rounded-md border border-ink-line text-paper-dim text-xs font-medium hover:border-ink-linestrong hover:text-paper transition-colors aria-pressed:bg-brass/10 aria-pressed:border-brass/50 aria-pressed:text-brass" data-filter="Index" aria-pressed="false">Index</button>
+                <button class="filter-chip shrink-0 min-h-[36px] px-3 rounded-md border border-ink-line text-paper-dim text-xs font-medium hover:border-ink-linestrong hover:text-paper transition-colors aria-pressed:bg-brass/10 aria-pressed:border-brass/50 aria-pressed:text-brass" data-filter="Nifty" aria-pressed="false">Nifty</button>
+                <button class="filter-chip shrink-0 min-h-[36px] px-3 rounded-md border border-ink-line text-paper-dim text-xs font-medium hover:border-ink-linestrong hover:text-paper transition-colors aria-pressed:bg-brass/10 aria-pressed:border-brass/50 aria-pressed:text-brass" data-filter="Liquid" aria-pressed="false">Liquid</button>
+                <button class="filter-chip shrink-0 min-h-[36px] px-3 rounded-md border border-ink-line text-paper-dim text-xs font-medium hover:border-ink-linestrong hover:text-paper transition-colors aria-pressed:bg-brass/10 aria-pressed:border-brass/50 aria-pressed:text-brass" data-filter="ELSS" aria-pressed="false">ELSS</button>
+            </div>
+
             <div class="relative">
-                <div class="absolute inset-y-0 left-0 pl-3.5 sm:pl-4 flex items-center pointer-events-none text-slate-500 text-sm sm:text-base">
+                <div class="absolute left-0 top-1/2 -translate-y-1/2 pl-1 pr-3 text-paper-mute pointer-events-none" aria-hidden="true">
                     <i class="fas fa-search"></i>
                 </div>
 
-                <input type="text" id="search-input" 
-                    class="w-full pl-10 sm:pl-11 pr-9 py-3 sm:py-3.5 bg-slate-950 border border-slate-800 rounded-xl text-xs sm:text-base text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition-all font-medium"
-                    placeholder="Enter Fund Name, Scheme Code, or ISIN..." autocomplete="off" disabled>
+                <input type="text" id="search-input"
+                    role="combobox" aria-expanded="false" aria-controls="autocomplete-results" aria-haspopup="listbox" aria-autocomplete="list"
+                    class="w-full pl-9 pr-12 py-4 bg-transparent border-0 border-b-2 border-ink-line focus:border-brass focus:ring-0 focus:outline-none text-base sm:text-lg text-paper placeholder:text-paper-mute/70 font-medium transition-colors"
+                    placeholder="Fund house, scheme name, code, or ISIN" autocomplete="off" spellcheck="false" disabled>
 
-                <button id="clear-search-btn" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 hidden">
-                    <i class="fas fa-times-circle text-base"></i>
+                <button id="clear-search-btn" aria-label="Clear search"
+                    class="absolute right-0 top-1/2 -translate-y-1/2 h-11 w-11 flex items-center justify-center text-paper-mute hover:text-paper transition-colors hidden">
+                    <i class="fas fa-times-circle text-lg" aria-hidden="true"></i>
                 </button>
 
-                <!-- Dropdown -->
-                <div id="autocomplete-results" 
-                    class="autocomplete-dropdown absolute z-30 left-0 right-0 mt-2 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl max-h-72 sm:max-h-80 overflow-y-auto hidden divide-y divide-slate-800/60">
+                <!-- Results listbox -->
+                <ul id="autocomplete-results" role="listbox" aria-label="Matching schemes"
+                    class="scheme-list absolute z-30 left-0 right-0 top-full mt-3 bg-ink-raise border border-ink-line rounded-lg shadow-2xl shadow-black/50 max-h-80 overflow-y-auto hidden m-0 p-0 list-none">
+                </ul>
+            </div>
+
+            <!-- Recent searches -->
+            <div id="recent-searches-container" class="hidden mt-5">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-[11px] tracking-[0.14em] uppercase text-paper-mute">Recent</span>
+                    <button id="clear-recent-btn" class="text-xs text-paper-mute hover:text-paper-dim transition-colors underline-offset-2 hover:underline">Clear</button>
+                </div>
+                <div id="recent-searches-list" class="flex flex-wrap gap-2"></div>
+            </div>
+        </section>
+
+        <!-- Board: loading / idle / error -->
+        <section id="idle-board" aria-live="polite" class="border-y border-ink-line py-10 sm:py-12">
+
+            <div id="board-loading" class="space-y-4">
+                <div class="skeleton-bar w-44"></div>
+                <div class="skeleton-bar w-72 max-w-full"></div>
+                <div class="skeleton-bar w-56 max-w-full"></div>
+            </div>
+
+            <div id="board-idle" class="hidden">
+                <p id="archive-stats" class="text-xs font-mono tnum text-paper-mute mb-3"></p>
+                <h2 class="text-2xl sm:text-3xl font-bold tracking-tight text-paper">Find any scheme's latest NAV.</h2>
+                <p class="mt-2 text-paper-dim max-w-xl">Search by fund house, scheme name, scheme code, or ISIN. Select a result to see its full record.</p>
+                <div class="mt-5 flex flex-wrap items-center gap-2">
+                    <span class="text-xs text-paper-mute mr-1">Try</span>
+                    <button class="example-chip min-h-[36px] px-3 rounded-md bg-ink-raise border border-ink-line text-paper-dim text-xs font-mono hover:text-brass hover:border-brass/50 transition-colors" data-example="Axis">Axis</button>
+                    <button class="example-chip min-h-[36px] px-3 rounded-md bg-ink-raise border border-ink-line text-paper-dim text-xs font-mono hover:text-brass hover:border-brass/50 transition-colors" data-example="Nippon India">Nippon India</button>
+                    <button class="example-chip min-h-[36px] px-3 rounded-md bg-ink-raise border border-ink-line text-paper-dim text-xs font-mono hover:text-brass hover:border-brass/50 transition-colors" data-example="Small Cap">Small Cap</button>
                 </div>
             </div>
 
-            <!-- Quick Category Filter Chips -->
-            <div class="mt-3 flex items-center gap-1.5 sm:gap-2 text-xs overflow-x-auto pb-0.5">
-                <span class="text-slate-500 text-[10px] sm:text-[11px] shrink-0">Filters:</span>
-                <button class="filter-chip shrink-0 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md bg-slate-800/80 hover:bg-sky-950 hover:text-sky-400 text-slate-400 font-medium transition-colors border border-slate-800 text-[11px] sm:text-xs" data-filter="Growth">Growth</button>
-                <button class="filter-chip shrink-0 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md bg-slate-800/80 hover:bg-sky-950 hover:text-sky-400 text-slate-400 font-medium transition-colors border border-slate-800 text-[11px] sm:text-xs" data-filter="Direct">Direct</button>
-                <button class="filter-chip shrink-0 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md bg-slate-800/80 hover:bg-sky-950 hover:text-sky-400 text-slate-400 font-medium transition-colors border border-slate-800 text-[11px] sm:text-xs" data-filter="Dividend">Dividend</button>
-                <button class="filter-chip shrink-0 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md bg-slate-800/80 hover:bg-sky-950 hover:text-sky-400 text-slate-400 font-medium transition-colors border border-slate-800 text-[11px] sm:text-xs" data-filter="Regular">Regular</button>
+            <div id="board-error" class="hidden">
+                <p class="flex items-center gap-2 text-alert font-medium"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> Couldn't reach the archive files.</p>
+                <p class="mt-1.5 text-sm text-paper-dim">Check your connection, then try again.</p>
+                <button id="retry-btn" class="mt-4 min-h-[40px] px-4 rounded-md border border-brass/60 text-brass text-sm font-semibold hover:bg-brass/10 active:scale-[0.98] transition-all">Retry</button>
             </div>
-        </div>
+        </section>
 
-        <!-- Clean, Modern NAV Result Display -->
-        <div id="result-card" class="bg-slate-900 rounded-2xl border border-slate-800 p-4 sm:p-6 shadow-xl hidden space-y-4 sm:space-y-6">
-            
-            <!-- Top Header: Scheme Name & Date -->
-            <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-slate-800/80 pb-5">
-                <div class="space-y-1">
-                    <h2 id="res-name" class="text-lg sm:text-xl font-bold text-white leading-snug"></h2>
-                    <div class="flex items-center gap-2 text-xs text-slate-400 font-mono">
-                        <span>Code: <strong id="res-code" class="text-sky-400"></strong></span>
+        <!-- Quote: ledger entry -->
+        <section id="quote-panel" class="hidden anim-rise border border-ink-line rounded-lg bg-ink overflow-hidden" aria-labelledby="res-name">
+            <div class="flex items-start justify-between gap-4 p-5 sm:p-6 pb-4">
+                <div class="min-w-0">
+                    <h2 id="res-name" class="text-lg sm:text-2xl font-semibold leading-snug text-paper break-words"></h2>
+                    <p class="mt-1.5 text-xs font-mono tnum text-paper-mute">
+                        Code <span id="res-code" class="text-paper-dim font-medium"></span>
+                        <span class="mx-2 text-ink-linestrong" aria-hidden="true">|</span>
+                        As of <span id="res-date" class="text-paper-dim font-medium"></span>
+                    </p>
+                </div>
+                <button id="new-search-btn" class="shrink-0 min-h-[36px] px-3 rounded-md text-xs font-medium text-paper-mute hover:text-paper border border-transparent hover:border-ink-line transition-colors">New search</button>
+            </div>
+
+            <div class="grid md:grid-cols-[minmax(0,1fr)_minmax(280px,420px)] border-t border-ink-line">
+                <div class="p-5 sm:p-6 md:border-r border-ink-line">
+                    <p class="text-[11px] font-semibold tracking-[0.16em] uppercase text-paper-mute mb-3">Net asset value · per unit</p>
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-xl sm:text-2xl text-money/70 font-sans" aria-hidden="true">₹</span>
+                        <span id="res-nav" class="font-mono tnum text-5xl sm:text-6xl font-medium text-money tracking-tight"></span>
                     </div>
                 </div>
-                <div class="self-start">
-                    <span id="res-date" class="px-3 py-1 rounded-md bg-slate-800 text-slate-300 border border-slate-700 text-xs font-mono"></span>
-                </div>
-            </div>
-            
-            <!-- Clean NAV Display Box -->
-            <div class="bg-slate-950 rounded-xl p-5 border border-slate-800/80">
-                <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Net Asset Value</div>
-                <div class="text-3xl sm:text-4xl font-extrabold text-emerald-400 tracking-tight flex items-baseline gap-1 font-mono">
-                    <span class="text-xl text-emerald-500 font-sans">₹</span>
-                    <span id="res-nav"></span>
-                </div>
-            </div>
 
-            <!-- Metadata Details Grid -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                <div id="res-isin-card" class="bg-slate-950/60 rounded-lg p-3.5 border border-slate-800/60 flex items-center justify-between text-xs">
-                    <div>
-                        <span class="text-slate-500 block text-[11px]">ISIN (Payout / Growth)</span>
-                        <span id="res-isin" class="font-mono text-slate-300 font-medium break-all"></span>
+                <div class="border-t md:border-t-0 border-ink-line divide-y divide-ink-line">
+                    <div id="res-isin-card" class="flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5">
+                        <div class="min-w-0">
+                            <p class="text-[11px] font-semibold tracking-[0.16em] uppercase text-paper-mute">ISIN · Payout / Growth</p>
+                            <p id="res-isin" class="font-mono tnum text-sm text-paper-dim break-all mt-0.5"></p>
+                        </div>
+                        <button class="copy-btn shrink-0 h-11 w-11 flex items-center justify-center rounded-md text-paper-mute hover:text-brass hover:bg-ink-high transition-colors" data-copy-target="res-isin" aria-label="Copy payout and growth ISIN">
+                            <i class="far fa-copy text-base" aria-hidden="true"></i>
+                        </button>
                     </div>
-                    <button class="copy-btn text-slate-500 hover:text-sky-400 transition-colors p-1" data-copy-target="res-isin" title="Copy ISIN">
-                        <i class="far fa-copy text-sm"></i>
-                    </button>
-                </div>
 
-                <div id="res-isin-reinv-card" class="bg-slate-950/60 rounded-lg p-3.5 border border-slate-800/60 flex items-center justify-between text-xs">
-                    <div>
-                        <span class="text-slate-500 block text-[11px]">ISIN (Reinvestment)</span>
-                        <span id="res-isin-reinv" class="font-mono text-slate-300 font-medium break-all"></span>
+                    <div id="res-isin-reinv-card" class="flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5">
+                        <div class="min-w-0">
+                            <p class="text-[11px] font-semibold tracking-[0.16em] uppercase text-paper-mute">ISIN · Reinvestment</p>
+                            <p id="res-isin-reinv" class="font-mono tnum text-sm text-paper-dim break-all mt-0.5"></p>
+                        </div>
+                        <button class="copy-btn shrink-0 h-11 w-11 flex items-center justify-center rounded-md text-paper-mute hover:text-brass hover:bg-ink-high transition-colors" data-copy-target="res-isin-reinv" aria-label="Copy reinvestment ISIN">
+                            <i class="far fa-copy text-base" aria-hidden="true"></i>
+                        </button>
                     </div>
-                    <button class="copy-btn text-slate-500 hover:text-sky-400 transition-colors p-1" data-copy-target="res-isin-reinv" title="Copy ISIN">
-                        <i class="far fa-copy text-sm"></i>
-                    </button>
                 </div>
             </div>
-        </div>
-
-        <!-- Recent Searches -->
-        <div id="recent-searches-container" class="hidden space-y-2">
-            <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wider flex items-center justify-between">
-                <span>Recent Searches</span>
-                <button id="clear-recent-btn" class="hover:text-slate-400 transition-colors text-slate-600">Clear</button>
-            </div>
-            <div id="recent-searches-list" class="flex flex-wrap gap-2"></div>
-        </div>
-
-        <!-- Empty State -->
-        <div id="empty-state" class="text-center py-12 px-4 rounded-2xl bg-slate-900/40 border border-slate-800/40">
-            <i class="fas fa-search-dollar text-slate-700 text-3xl mb-2"></i>
-            <p class="text-sm text-slate-400">Search for any Indian mutual fund scheme above</p>
-        </div>
+        </section>
 
     </main>
 
-    <!-- Footer -->
-    <footer class="bg-slate-950 border-t border-slate-900 py-6 text-center mt-auto text-xs text-slate-600">
-        Data sourced automatically from <a href="https://www.amfiindia.com/" target="_blank" class="text-slate-400 hover:underline">AMFI India</a>
+    <!-- Colophon -->
+    <footer class="border-t border-ink-line py-6 mt-auto">
+        <div class="max-w-5xl mx-auto px-4 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-paper-mute">
+            <p>Data sourced automatically from <a href="https://www.amfiindia.com/" target="_blank" rel="noopener" class="text-paper-dim hover:text-brass transition-colors underline-offset-2 hover:underline">AMFI India</a></p>
+            <p class="font-mono tnum">Archive begins 2026-04-01 · Refreshed daily ~19:00 IST</p>
+        </div>
     </footer>
 
-    <!-- Scripts -->
+    <span id="sr-status" class="sr-only" aria-live="polite"></span>
+
     <script>
         let navData = [];
-        let recentSearches = JSON.parse(localStorage.getItem('mf_recent_searches') || '[]');
-        
+        let recentSearches = [];
+        let matches = [];
+        let activeIndex = -1;
+        const activeFilters = new Set();
+
+        try {
+            const stored = JSON.parse(localStorage.getItem('mf_recent_searches') || '[]');
+            if (Array.isArray(stored)) recentSearches = stored;
+        } catch (err) {
+            console.warn("Corrupted recent searches ignored:", err);
+        }
+
         const searchInput = document.getElementById('search-input');
         const clearSearchBtn = document.getElementById('clear-search-btn');
         const resultsDropdown = document.getElementById('autocomplete-results');
-        const resultCard = document.getElementById('result-card');
-        const emptyState = document.getElementById('empty-state');
+        const quotePanel = document.getElementById('quote-panel');
+        const idleBoard = document.getElementById('idle-board');
+        const boardLoading = document.getElementById('board-loading');
+        const boardIdle = document.getElementById('board-idle');
+        const boardError = document.getElementById('board-error');
         const lastUpdatedEl = document.getElementById('last-updated');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const downloadBtn = document.getElementById('download-btn');
+        const srStatus = document.getElementById('sr-status');
+
+        const DOT_STYLES = {
+            loading: 'w-1.5 h-1.5 rounded-full bg-brass animate-pulse shrink-0',
+            live:    'w-1.5 h-1.5 rounded-full bg-money shrink-0',
+            error:   'w-1.5 h-1.5 rounded-full bg-alert shrink-0',
+        };
+
+        function setStatus(kind, text) {
+            statusDot.className = DOT_STYLES[kind] || DOT_STYLES.loading;
+            statusText.textContent = text;
+        }
 
         function formatDateIST(dateObj) {
             const options = { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' };
@@ -224,7 +366,7 @@
         async function fetchAndDecompressGzip(filePath) {
             const response = await fetch(filePath);
             if (!response.ok) return null;
-            
+
             if (typeof DecompressionStream !== 'undefined') {
                 const decompressedStream = response.body.pipeThrough(new DecompressionStream('gzip'));
                 return await new Response(decompressedStream).text();
@@ -233,9 +375,107 @@
             }
         }
 
-        async function loadLatestNavData() {
+        // Native parser for the archive's own 3-column CSV
+        // (scheme_code, nav, nav_date contain no commas, quotes, or newlines).
+        function parseNavCsv(text) {
+            const rows = [];
+            const lines = text.split(/\r?\n/);
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                const parts = line.split(',');
+                if (parts.length < 3) continue;
+                rows.push({
+                    scheme_code: parts[0].trim(),
+                    nav: parts[1].trim(),
+                    nav_date: parts[2].trim(),
+                });
+            }
+            return rows;
+        }
+
+        async function resolveLatestSnapshotPath() {
+            // O(1) path: pipeline-written pointer. Falls back to probing dates.
+            try {
+                const res = await fetch('data/latest.json', { cache: 'no-store' });
+                if (res.ok) {
+                    const pointer = await res.json();
+                    if (pointer && typeof pointer.file === 'string' && !pointer.file.includes('..')) {
+                        return `data/${pointer.file}`;
+                    }
+                }
+            } catch (err) {
+                console.warn("latest.json unavailable; falling back to date probing.");
+            }
+            return null;
+        }
+
+        function buildCandidatePaths() {
+            const paths = [];
             let currentDate = new Date();
-            const maxDaysToTry = 14;
+            for (let i = 0; i < 14; i++) {
+                const d = new Date(currentDate);
+                d.setDate(d.getDate() - i);
+                const { year, month, formatted } = formatDateIST(d);
+                paths.push(`data/${year}/${month}/nav_${formatted}.csv.gz`);
+            }
+            return paths;
+        }
+
+        async function applySnapshot(filePath, schemesMap) {
+            const csvText = await fetchAndDecompressGzip(filePath);
+            if (csvText === null) return false;
+
+            const parsedRows = parseNavCsv(csvText);
+            if (parsedRows.length === 0) return false;
+
+            navData = parsedRows.map(row => {
+                const code = String(row.scheme_code || '').trim();
+                const meta = schemesMap[code] || ['', '', `Scheme ${code}`];
+                const record = {
+                    scheme_code: code,
+                    nav: row.nav,
+                    nav_date: row.nav_date,
+                    isin_payout_or_growth: meta[0] || '-',
+                    isin_reinvestment: meta[1] || '-',
+                    scheme_name: meta[2] || `Scheme ${code}`
+                };
+                record._search = [
+                    record.scheme_name,
+                    record.scheme_code,
+                    record.isin_payout_or_growth,
+                    record.isin_reinvestment
+                ].join(' ').toLowerCase();
+                return record;
+            });
+
+            searchInput.disabled = false;
+            searchInput.placeholder = `Search ${navData.length.toLocaleString()} schemes`;
+
+            const latestDate = navData[0].nav_date || '';
+            setStatus('live', `Updated ${latestDate}`);
+
+            document.getElementById('archive-stats').textContent =
+                `${navData.length.toLocaleString()} schemes · data as of ${latestDate}`;
+
+            if (downloadBtn) {
+                downloadBtn.href = filePath;
+                downloadBtn.download = `nav_${latestDate}.csv.gz`;
+                downloadBtn.classList.remove('opacity-40', 'pointer-events-none');
+                downloadBtn.removeAttribute('aria-disabled');
+            }
+
+            boardLoading.classList.add('hidden');
+            boardIdle.classList.remove('hidden');
+
+            renderRecentSearches();
+            return true;
+        }
+
+        async function loadLatestNavData() {
+            boardError.classList.add('hidden');
+            boardIdle.classList.add('hidden');
+            boardLoading.classList.remove('hidden');
 
             let schemesMap = {};
             try {
@@ -247,154 +487,278 @@
                 console.warn("Failed loading schemes.json.gz:", err);
             }
 
-            for (let i = 0; i < maxDaysToTry; i++) {
-                const d = new Date(currentDate);
-                d.setDate(d.getDate() - i);
-                const { year, month, formatted } = formatDateIST(d);
-                const filePath = `data/${year}/${month}/nav_${formatted}.csv.gz`;
+            const candidates = [];
+            const pointed = await resolveLatestSnapshotPath();
+            if (pointed) candidates.push(pointed);
+            for (const path of buildCandidatePaths()) {
+                if (!candidates.includes(path)) candidates.push(path);
+            }
 
+            for (const filePath of candidates) {
                 try {
-                    const csvText = await fetchAndDecompressGzip(filePath);
-                    if (csvText !== null) {
-                        const parsed = Papa.parse(csvText, {
-                            header: true,
-                            skipEmptyLines: true
-                        });
-
-                        if (parsed.data && parsed.data.length > 0) {
-                            navData = parsed.data.map(row => {
-                                const code = String(row.scheme_code || '').trim();
-                                const meta = schemesMap[code] || ['', '', row.scheme_name || `Scheme ${code}`];
-                                return {
-                                    scheme_code: code,
-                                    nav: row.nav,
-                                    nav_date: row.nav_date,
-                                    isin_payout_or_growth: row.isin_payout_or_growth || meta[0] || '-',
-                                    isin_reinvestment: row.isin_reinvestment || meta[1] || '-',
-                                    scheme_name: row.scheme_name || meta[2] || `Scheme ${code}`
-                                };
-                            });
-
-                            searchInput.disabled = false;
-                            searchInput.placeholder = `Search among ${navData.length.toLocaleString()} schemes...`;
-                            
-                            const latestDate = (navData.length > 0 && navData[0].nav_date) ? navData[0].nav_date : formatted;
-                            lastUpdatedEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Updated ${latestDate}`;
-                            
-                            const downloadBtn = document.getElementById('download-btn');
-                            if (downloadBtn) {
-                                downloadBtn.href = filePath;
-                                downloadBtn.download = `nav_${latestDate}.csv.gz`;
-                            }
-
-                            renderRecentSearches();
-                            return;
-                        }
-                    }
+                    if (await applySnapshot(filePath, schemesMap)) return;
                 } catch (err) {
                     console.warn(`Attempt for ${filePath} failed:`, err);
                 }
             }
 
-            searchInput.placeholder = "Error loading data.";
-            lastUpdatedEl.innerHTML = `<i class="fas fa-exclamation-triangle text-rose-500"></i> Error loading`;
+            setStatus('error', 'Data unavailable');
+            boardLoading.classList.add('hidden');
+            boardError.classList.remove('hidden');
+            searchInput.placeholder = 'Archive unavailable';
         }
+
+        document.getElementById('retry-btn').addEventListener('click', () => {
+            setStatus('loading', 'Retrying');
+            loadLatestNavData();
+        });
 
         loadLatestNavData();
 
-        // Search logic
-        searchInput.addEventListener('input', (e) => {
-            const query = e.target.value.toLowerCase().trim();
+        // Safe highlighting: builds text nodes + <mark>, never innerHTML.
+        function highlightInto(el, text, query) {
+            el.textContent = '';
+            if (!text) return;
+            if (!query) {
+                el.textContent = text;
+                return;
+            }
+            const lowerText = text.toLowerCase();
+            const q = query.toLowerCase();
+            let cursor = 0;
+            while (cursor <= text.length) {
+                const idx = lowerText.indexOf(q, cursor);
+                if (idx === -1) {
+                    el.appendChild(document.createTextNode(text.slice(cursor)));
+                    break;
+                }
+                if (idx > cursor) {
+                    el.appendChild(document.createTextNode(text.slice(cursor, idx)));
+                }
+                const mark = document.createElement('mark');
+                mark.textContent = text.slice(idx, idx + q.length);
+                el.appendChild(mark);
+                cursor = idx + q.length;
+            }
+        }
+
+        function openListbox() {
+            resultsDropdown.classList.remove('hidden');
+            resultsDropdown.classList.add('anim-rise');
+            searchInput.setAttribute('aria-expanded', 'true');
+        }
+
+        function closeListbox() {
+            resultsDropdown.classList.add('hidden');
+            resultsDropdown.classList.remove('anim-rise');
             resultsDropdown.innerHTML = '';
-            
-            if (query.length > 0) {
+            searchInput.setAttribute('aria-expanded', 'false');
+            searchInput.removeAttribute('aria-activedescendant');
+            matches = [];
+            activeIndex = -1;
+        }
+
+        function setActiveOption(index) {
+            const options = Array.from(resultsDropdown.querySelectorAll('[role="option"]'));
+            if (!options.length) return;
+            activeIndex = ((index % options.length) + options.length) % options.length;
+            options.forEach((opt, idx) => {
+                opt.setAttribute('aria-selected', idx === activeIndex ? 'true' : 'false');
+            });
+            searchInput.setAttribute('aria-activedescendant', options[activeIndex].id);
+            options[activeIndex].scrollIntoView({ block: 'nearest' });
+        }
+
+        function selectMatch(match) {
+            displayResult(match);
+            saveRecentSearch(match);
+            closeListbox();
+            searchInput.value = match.scheme_name;
+            clearSearchBtn.classList.remove('hidden');
+        }
+
+        function currentQuery() {
+            return searchInput.value.toLowerCase().trim();
+        }
+
+        function renderMatches(rawQuery) {
+            resultsDropdown.innerHTML = '';
+            searchInput.removeAttribute('aria-activedescendant');
+
+            const query = rawQuery.toLowerCase().trim();
+            const filters = Array.from(activeFilters);
+            const hasCriteria = query.length >= 2 || filters.length > 0;
+
+            if (!hasCriteria) {
+                closeListbox();
+                return;
+            }
+
+            matches = navData.filter(row => {
+                if (!row._search) return false;
+                for (const f of filters) {
+                    if (!row._search.includes(f)) return false;
+                }
+                return !query || row._search.includes(query);
+            }).slice(0, 35);
+
+            if (matches.length > 0) {
+                matches.forEach((match, i) => {
+                    const li = document.createElement('li');
+                    li.id = `opt-${i}`;
+                    li.setAttribute('role', 'option');
+                    li.setAttribute('aria-selected', 'false');
+                    li.className = 'option-row opt-enter px-4 py-3 cursor-pointer flex flex-col gap-0.5 border-b border-ink-line last:border-b-0 hover:bg-ink-high transition-colors';
+                    li.style.animationDelay = `${Math.min(i * 16, 160)}ms`;
+
+                    const nameDiv = document.createElement('div');
+                    nameDiv.className = 'font-medium text-paper text-sm leading-snug';
+                    highlightInto(nameDiv, match.scheme_name, query);
+
+                    const metaDiv = document.createElement('div');
+                    metaDiv.className = 'text-xs text-paper-mute flex items-center gap-3 font-mono tnum';
+
+                    const codeSpan = document.createElement('span');
+                    codeSpan.className = 'text-brass';
+                    codeSpan.appendChild(document.createTextNode('Code '));
+                    highlightInto(codeSpan, match.scheme_code, query);
+
+                    metaDiv.appendChild(codeSpan);
+                    if (match.isin_payout_or_growth && match.isin_payout_or_growth !== '-') {
+                        const isinSpan = document.createElement('span');
+                        isinSpan.className = 'truncate';
+                        isinSpan.appendChild(document.createTextNode('ISIN '));
+                        highlightInto(isinSpan, match.isin_payout_or_growth, query);
+                        metaDiv.appendChild(isinSpan);
+                    }
+
+                    li.appendChild(nameDiv);
+                    li.appendChild(metaDiv);
+                    li.addEventListener('click', () => selectMatch(match));
+                    li.addEventListener('mousemove', () => {
+                        if (activeIndex !== i) setActiveOption(i);
+                    });
+                    resultsDropdown.appendChild(li);
+                });
+                openListbox();
+                setActiveOption(0);
+            } else {
+                const li = document.createElement('li');
+                // Non-interactive: must never intercept clicks on page controls.
+                li.className = 'px-4 py-4 text-sm text-paper-mute text-center pointer-events-none';
+                const msg = document.createElement('p');
+                msg.textContent = query
+                    ? `No schemes match "${rawQuery.trim()}".`
+                    : 'No schemes match these filters.';
+                const hint = document.createElement('p');
+                hint.className = 'text-xs mt-1';
+                hint.textContent = 'Try a shorter fragment, the scheme code, or an ISIN.';
+                li.appendChild(msg);
+                li.appendChild(hint);
+                resultsDropdown.appendChild(li);
+                openListbox();
+                matches = [];
+                activeIndex = -1;
+            }
+        }
+
+        function debounce(fn, ms) {
+            let timer;
+            return (...args) => {
+                clearTimeout(timer);
+                timer = setTimeout(() => fn(...args), ms);
+            };
+        }
+
+        searchInput.addEventListener('input', () => {
+            if (searchInput.value.trim().length > 0) {
                 clearSearchBtn.classList.remove('hidden');
             } else {
                 clearSearchBtn.classList.add('hidden');
             }
+        });
 
-            if (query.length < 2) {
-                resultsDropdown.classList.add('hidden');
-                return;
-            }
+        const runSearch = debounce(() => renderMatches(searchInput.value), 120);
+        searchInput.addEventListener('input', runSearch);
 
-            const matches = navData.filter(row => {
-                return (row.scheme_name && row.scheme_name.toLowerCase().includes(query)) ||
-                       (row.scheme_code && row.scheme_code.includes(query)) ||
-                       (row.isin_payout_or_growth && row.isin_payout_or_growth.toLowerCase().includes(query)) ||
-                       (row.isin_reinvestment && row.isin_reinvestment.toLowerCase().includes(query));
-            }).slice(0, 35);
+        searchInput.addEventListener('keydown', (e) => {
+            const isOpen = !resultsDropdown.classList.contains('hidden');
 
-            if (matches.length > 0) {
-                matches.forEach(match => {
-                    const div = document.createElement('div');
-                    div.className = 'px-4 py-3 cursor-pointer hover:bg-slate-800/80 transition-colors flex flex-col gap-0.5';
-                    div.innerHTML = `
-                        <div class="font-medium text-slate-200 text-sm leading-snug">${highlightMatch(match.scheme_name, query)}</div>
-                        <div class="text-xs text-slate-500 flex items-center gap-3 font-mono">
-                            <span class="text-sky-400 font-semibold">Code: ${highlightMatch(match.scheme_code, query)}</span>
-                            ${match.isin_payout_or_growth && match.isin_payout_or_growth !== '-' ? `<span>ISIN: ${highlightMatch(match.isin_payout_or_growth, query)}</span>` : ''}
-                        </div>
-                    `;
-                    div.addEventListener('click', () => {
-                        displayResult(match);
-                        saveRecentSearch(match);
-                        resultsDropdown.classList.add('hidden');
-                        searchInput.value = match.scheme_name;
-                    });
-                    resultsDropdown.appendChild(div);
-                });
-                resultsDropdown.classList.remove('hidden');
-            } else {
-                const div = document.createElement('div');
-                div.className = 'px-4 py-3 text-slate-500 text-xs italic text-center';
-                div.innerText = 'No matching schemes found.';
-                resultsDropdown.appendChild(div);
-                resultsDropdown.classList.remove('hidden');
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (!isOpen) {
+                    renderMatches(searchInput.value);
+                } else if (matches.length) {
+                    setActiveOption(activeIndex + 1);
+                }
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (isOpen && matches.length) {
+                    setActiveOption(activeIndex <= 0 ? matches.length - 1 : activeIndex - 1);
+                }
+            } else if (e.key === 'Enter') {
+                if (isOpen && matches.length) {
+                    e.preventDefault();
+                    selectMatch(matches[activeIndex >= 0 ? activeIndex : 0]);
+                }
+            } else if (e.key === 'Escape') {
+                if (isOpen) {
+                    closeListbox();
+                } else if (searchInput.value) {
+                    clearSearch();
+                }
             }
         });
 
-        // Clear search input
-        clearSearchBtn.addEventListener('click', () => {
+        function clearSearch() {
             searchInput.value = '';
             clearSearchBtn.classList.add('hidden');
-            resultsDropdown.classList.add('hidden');
+            closeListbox();
             searchInput.focus();
-        });
+        }
+
+        clearSearchBtn.addEventListener('click', clearSearch);
 
         // Keyboard Shortcut (Ctrl+K or Cmd+K)
         document.addEventListener('keydown', (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
                 e.preventDefault();
                 searchInput.focus();
+                searchInput.select();
             }
         });
 
-        // Filter chips
+        // Quick filters: real toggles combined with the query.
         document.querySelectorAll('.filter-chip').forEach(chip => {
             chip.addEventListener('click', () => {
-                const filterText = chip.getAttribute('data-filter');
-                searchInput.value = filterText;
-                searchInput.dispatchEvent(new Event('input'));
+                const term = (chip.getAttribute('data-filter') || '').toLowerCase();
+                const pressed = chip.getAttribute('aria-pressed') === 'true';
+                chip.setAttribute('aria-pressed', String(!pressed));
+                if (pressed) {
+                    activeFilters.delete(term);
+                } else {
+                    activeFilters.add(term);
+                }
+                renderMatches(searchInput.value);
+            });
+        });
+
+        // Example queries on the idle board.
+        document.querySelectorAll('.example-chip').forEach(btn => {
+            btn.addEventListener('click', () => {
+                searchInput.value = btn.getAttribute('data-example') || '';
+                clearSearchBtn.classList.remove('hidden');
+                renderMatches(searchInput.value);
                 searchInput.focus();
             });
         });
 
-        // Highlight matching query text
-        function highlightMatch(text, query) {
-            if (!text) return '';
-            const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-            return text.replace(regex, '<mark class="bg-sky-500/20 text-sky-300 px-0.5 rounded font-semibold">$1</mark>');
-        }
-
-        // Display selected result card
         function displayResult(scheme) {
-            document.getElementById('res-name').textContent = scheme.scheme_name || 'N/A';
-            document.getElementById('res-nav').textContent = scheme.nav || 'N/A';
-            document.getElementById('res-date').textContent = scheme.nav_date || 'N/A';
-            document.getElementById('res-code').textContent = scheme.scheme_code || 'N/A';
-            
-            // ISIN Payout / Growth
+            document.getElementById('res-name').textContent = scheme.scheme_name || 'Unnamed scheme';
+            document.getElementById('res-nav').textContent = scheme.nav || '—';
+            document.getElementById('res-date').textContent = scheme.nav_date || '—';
+            document.getElementById('res-code').textContent = scheme.scheme_code || '—';
+
             const mainIsin = (scheme.isin_payout_or_growth && scheme.isin_payout_or_growth !== '-' && scheme.isin_payout_or_growth !== 'N/A') ? scheme.isin_payout_or_growth : null;
             const mainIsinCard = document.getElementById('res-isin-card');
             if (mainIsin) {
@@ -404,7 +768,6 @@
                 mainIsinCard.classList.add('hidden');
             }
 
-            // ISIN Reinvestment
             const reinvIsin = (scheme.isin_reinvestment && scheme.isin_reinvestment !== '-' && scheme.isin_reinvestment !== 'N/A') ? scheme.isin_reinvestment : null;
             const reinvCard = document.getElementById('res-isin-reinv-card');
             if (reinvIsin) {
@@ -413,29 +776,52 @@
             } else {
                 reinvCard.classList.add('hidden');
             }
-            
-            emptyState.classList.add('hidden');
-            resultCard.classList.remove('hidden');
+
+            idleBoard.classList.add('hidden');
+            quotePanel.classList.remove('hidden');
         }
+
+        document.getElementById('new-search-btn').addEventListener('click', () => {
+            quotePanel.classList.add('hidden');
+            idleBoard.classList.remove('hidden');
+            clearSearch();
+        });
 
         // Copy buttons
         document.querySelectorAll('.copy-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
+            btn.addEventListener('click', async () => {
                 const targetId = btn.getAttribute('data-copy-target');
                 const text = document.getElementById(targetId).textContent;
-                navigator.clipboard.writeText(text);
-                const origIcon = btn.innerHTML;
-                btn.innerHTML = `<i class="fas fa-check text-emerald-400 text-sm"></i>`;
-                setTimeout(() => { btn.innerHTML = origIcon; }, 1800);
+                try {
+                    await navigator.clipboard.writeText(text);
+                    const origIcon = btn.innerHTML;
+                    btn.innerHTML = '<i class="fas fa-check text-money text-base" aria-hidden="true"></i>';
+                    srStatus.textContent = 'Copied to clipboard';
+                    setTimeout(() => { btn.innerHTML = origIcon; }, 1800);
+                } catch (err) {
+                    srStatus.textContent = 'Copy failed. Long-press the value to copy it.';
+                }
             });
         });
 
         // Recent search tracking
         function saveRecentSearch(scheme) {
-            recentSearches = recentSearches.filter(item => item.scheme_code !== scheme.scheme_code);
-            recentSearches.unshift(scheme);
+            const slim = {
+                scheme_code: scheme.scheme_code,
+                scheme_name: scheme.scheme_name,
+                nav: scheme.nav,
+                nav_date: scheme.nav_date,
+                isin_payout_or_growth: scheme.isin_payout_or_growth,
+                isin_reinvestment: scheme.isin_reinvestment,
+            };
+            recentSearches = recentSearches.filter(item => item.scheme_code !== slim.scheme_code);
+            recentSearches.unshift(slim);
             if (recentSearches.length > 5) recentSearches.pop();
-            localStorage.setItem('mf_recent_searches', JSON.stringify(recentSearches));
+            try {
+                localStorage.setItem('mf_recent_searches', JSON.stringify(recentSearches));
+            } catch (err) {
+                console.warn("Recent search not saved:", err);
+            }
             renderRecentSearches();
         }
 
@@ -449,11 +835,16 @@
             list.innerHTML = '';
             recentSearches.forEach(scheme => {
                 const btn = document.createElement('button');
-                btn.className = 'text-xs px-2.5 py-1 rounded-md bg-slate-900 border border-slate-800 text-slate-300 font-medium hover:border-sky-500/50 hover:text-sky-400 transition-all flex items-center gap-1.5';
-                btn.innerHTML = `<i class="far fa-clock text-slate-500"></i> ${scheme.scheme_name.substring(0, 28)}...`;
+                btn.className = 'inline-flex items-center gap-1.5 min-h-[32px] px-2.5 rounded-md text-xs text-paper-dim font-medium hover:text-brass transition-colors';
+                const icon = document.createElement('i');
+                icon.className = 'far fa-clock text-paper-mute text-[11px]';
+                icon.setAttribute('aria-hidden', 'true');
+                btn.appendChild(icon);
+                btn.appendChild(document.createTextNode(` ${(scheme.scheme_name || '').substring(0, 28)}...`));
                 btn.addEventListener('click', () => {
                     displayResult(scheme);
                     searchInput.value = scheme.scheme_name;
+                    clearSearchBtn.classList.remove('hidden');
                 });
                 list.appendChild(btn);
             });
@@ -469,7 +860,7 @@
         // Close dropdown when clicking outside
         document.addEventListener('click', (e) => {
             if (!searchInput.contains(e.target) && !resultsDropdown.contains(e.target)) {
-                resultsDropdown.classList.add('hidden');
+                closeListbox();
             }
         });
     </script>
