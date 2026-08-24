@@ -47,7 +47,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if [ -d data ]; then
-            find data \( -name "*.csv.gz" -o -name "schemes.json.gz" -o -name "latest.json" \) -print0 | xargs -0 --no-run-if-empty git add
+            find data \( -name "*.csv.gz" -o -name "schemes.json.gz" -o -name "latest.json" -o -name ".feed_profile.json" \) -print0 | xargs -0 --no-run-if-empty git add
           fi
           if git diff --cached --quiet; then
             echo "No NAV changes to commit"
