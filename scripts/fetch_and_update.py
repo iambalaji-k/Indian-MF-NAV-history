@@ -12,6 +12,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -721,7 +722,7 @@ def write_latest_json(
     write_bytes_if_changed(data_dir / "latest.json", payload.encode("utf-8"))
 
 
-def write_schemes_json(db_paths: list[Path], target_path: Path = SCHEMES_JSON_GZ) -> None:
+def write_schemes_json(db_paths: list[Path], target_path: Path = DATA_DIR / "schemes.json.gz") -> None:
     """Merge scheme master data across financial-year partitions.
 
     Later (newer) databases win on conflicts so renames propagate, while
@@ -730,6 +731,15 @@ def write_schemes_json(db_paths: list[Path], target_path: Path = SCHEMES_JSON_GZ
     """
     target_path.parent.mkdir(parents=True, exist_ok=True)
     schemes_dict: dict[str, list[str]] = {}
+    if target_path.exists():
+        try:
+            with gzip.open(target_path, "rt", encoding="utf-8") as gz:
+                loaded = json.load(gz)
+                if isinstance(loaded, dict):
+                    schemes_dict = loaded
+        except Exception:
+            schemes_dict = {}
+
     for db_path in db_paths:
         if not db_path.exists():
             continue
@@ -773,26 +783,61 @@ def db_paths_for_rows(rows: list[NavRow], data_dir: Path = DATA_DIR) -> set[Path
     return db_paths
 
 
-def sync_down_databases_from_r2(db_paths: set[Path], data_dir: Path, config: R2Config) -> None:
-    for db_path in sorted(db_paths):
-        download_object(config, r2_key_for_db(db_path, data_dir), db_path)
+def sync_down_databases_from_r2(
+    db_paths: set[Path],
+    data_dir: Path,
+    config: R2Config,
+    max_workers: int = 4,
+) -> None:
+    if not db_paths:
+        return
+    sorted_paths = sorted(db_paths)
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(sorted_paths))) as executor:
+        futures = [
+            executor.submit(download_object, config, r2_key_for_db(db_path, data_dir), db_path)
+            for db_path in sorted_paths
+        ]
+        for future in futures:
+            future.result()
 
 
-def sync_up_databases_to_r2(db_hashes: dict[Path, str], data_dir: Path, config: R2Config) -> None:
-    for db_path, old_hash in sorted(db_hashes.items()):
-        if not db_path.exists():
-            continue
+def _upload_single_db(
+    db_path: Path,
+    old_hash: str,
+    data_dir: Path,
+    config: R2Config,
+) -> None:
+    if not db_path.exists():
+        return
 
-        new_hash = file_sha256(db_path)
-        if new_hash == old_hash:
-            logging.info("Database unchanged, skipping upload: %s", db_path)
-            continue
+    new_hash = file_sha256(db_path)
+    if new_hash == old_hash:
+        logging.info("Database unchanged, skipping upload: %s", db_path)
+        return
 
-        if validate_database(db_path) != 0:
-            raise RuntimeError(f"Database validation failed before upload: {db_path}")
+    if validate_database(db_path) != 0:
+        raise RuntimeError(f"Database validation failed before upload: {db_path}")
 
-        logging.info("Database changed (hash %s -> %s), uploading: %s", old_hash[:8], new_hash[:8], db_path)
-        atomic_upload_object(config, r2_key_for_db(db_path, data_dir), db_path, rotate_backups=True)
+    logging.info("Database changed (hash %s -> %s), uploading: %s", old_hash[:8], new_hash[:8], db_path)
+    atomic_upload_object(config, r2_key_for_db(db_path, data_dir), db_path, rotate_backups=True)
+
+
+def sync_up_databases_to_r2(
+    db_hashes: dict[Path, str],
+    data_dir: Path,
+    config: R2Config,
+    max_workers: int = 4,
+) -> None:
+    if not db_hashes:
+        return
+    sorted_items = sorted(db_hashes.items())
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(sorted_items))) as executor:
+        futures = [
+            executor.submit(_upload_single_db, db_path, old_hash, data_dir, config)
+            for db_path, old_hash in sorted_items
+        ]
+        for future in futures:
+            future.result()
 
 
 def update_databases(rows: list[NavRow], seen_on: date, data_dir: Path = DATA_DIR) -> set[Path]:
@@ -823,6 +868,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--timeout", type=int, default=10)
     parser.add_argument("--r2-sync", action="store_true", help="Download DBs from R2 before update and upload them after.")
+    parser.add_argument("--sync-all-fy", action="store_true", help="Download all historical financial-year DB partitions from R2 instead of single-FY.")
     parser.add_argument("--env-file", type=Path, default=ROOT_DIR / ".env")
     parser.add_argument("--allow-feed-drift", action="store_true", help="Allow feed drift under strict mode.")
     parser.add_argument("--strict-feed-drift", action="store_true", help="Fail if feed layout changes vs saved profile.")
@@ -830,7 +876,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def publish_artifacts(rows: list[NavRow], seen_on: date, data_dir: Path) -> None:
+def publish_artifacts(
+    rows: list[NavRow],
+    seen_on: date,
+    data_dir: Path,
+    db_paths: list[Path] | None = None,
+) -> None:
     csv_path = write_daily_run_csv(data_dir, rows, seen_on)
     snapshot_date = max(row.nav_date for row in rows)
     write_latest_json(
@@ -839,7 +890,8 @@ def publish_artifacts(rows: list[NavRow], seen_on: date, data_dir: Path) -> None
         snapshot_date=snapshot_date,
         scheme_count=len({row.scheme_code for row in rows}),
     )
-    write_schemes_json(all_fy_db_paths(seen_on, data_dir), target_path=data_dir / "schemes.json.gz")
+    paths_to_merge = db_paths if db_paths is not None else all_fy_db_paths(seen_on, data_dir)
+    write_schemes_json(paths_to_merge, target_path=data_dir / "schemes.json.gz")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -873,9 +925,13 @@ def main(argv: list[str] | None = None) -> int:
         r2_config = R2Config.from_env() if args.r2_sync else None
         if r2_config:
             with r2_lock(r2_config):
-                # Download every financial-year partition through seen_on so
-                # schemes.json.gz can merge scheme master data across FYs.
-                sync_down_databases_from_r2(set(all_fy_db_paths(seen_on, args.data_dir)), args.data_dir, r2_config)
+                # Single-FY sync: by default download only the partitions touched by the incoming feed.
+                sync_paths = (
+                    set(all_fy_db_paths(seen_on, args.data_dir))
+                    if args.sync_all_fy
+                    else db_paths
+                )
+                sync_down_databases_from_r2(sync_paths, args.data_dir, r2_config)
                 if not args.skip_sanity and args.input is None:
                     check_row_count_plausibility(len(rows), args.data_dir)
                 # Hash every rows-derived partition even when it does not
@@ -884,13 +940,13 @@ def main(argv: list[str] | None = None) -> int:
                 # its baseline hash and gets uploaded after the update.
                 db_hashes = {path: file_sha256(path) for path in db_paths}
                 update_databases(rows, seen_on, args.data_dir)
-                publish_artifacts(rows, seen_on, args.data_dir)
+                publish_artifacts(rows, seen_on, args.data_dir, db_paths=sorted(db_paths))
                 sync_up_databases_to_r2(db_hashes, args.data_dir, r2_config)
         else:
             if not args.skip_sanity and args.input is None:
                 check_row_count_plausibility(len(rows), args.data_dir)
             update_databases(rows, seen_on, args.data_dir)
-            publish_artifacts(rows, seen_on, args.data_dir)
+            publish_artifacts(rows, seen_on, args.data_dir, db_paths=sorted(db_paths))
 
         save_feed_profile(detected_layouts, len(rows), seen_on, args.data_dir)
     except Exception:

@@ -28,10 +28,12 @@ from scripts.fetch_and_update import (
     parse_nav_text,
     publish_artifacts,
     save_feed_profile,
+    sync_down_databases_from_r2,
     sync_up_databases_to_r2,
     update_databases,
     write_daily_run_csv,
     write_schemes_json,
+    main,
 )
 from scripts.r2_storage import R2Config, file_sha256
 
@@ -624,6 +626,67 @@ class FetchAndUpdateTests(unittest.TestCase):
     def test_stale_feed_warning(self) -> None:
         rows = [NavRow(100001, None, None, "Test", Decimal("10.00"), date(2026, 8, 1))]
         check_stale_feed(rows, date(2026, 8, 11), max_stale_days=4)
+
+    def test_sync_down_databases_from_r2_parallel(self) -> None:
+        config = R2Config(
+            account_id="account123",
+            bucket="nav-archive",
+            access_key_id="access",
+            secret_access_key="secret",
+            endpoint="https://account123.r2.cloudflarestorage.com",
+        )
+        with WorkspaceTemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            p1 = data_dir / "nav_fy_2026_27.db"
+            p2 = data_dir / "nav_fy_2027_28.db"
+            with patch("scripts.fetch_and_update.download_object") as mock_download:
+                sync_down_databases_from_r2({p1, p2}, data_dir, config, max_workers=2)
+                self.assertEqual(mock_download.call_count, 2)
+
+    def test_sync_up_databases_to_r2_parallel(self) -> None:
+        config = R2Config(
+            account_id="account123",
+            bucket="nav-archive",
+            access_key_id="access",
+            secret_access_key="secret",
+            endpoint="https://account123.r2.cloudflarestorage.com",
+        )
+        with WorkspaceTemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            p1 = data_dir / "nav_fy_2026_27.db"
+            p1.write_bytes(b"data1")
+            with (
+                patch("scripts.fetch_and_update.validate_database", return_value=0),
+                patch("scripts.fetch_and_update.atomic_upload_object") as mock_upload,
+            ):
+                sync_up_databases_to_r2({p1: "old_hash"}, data_dir, config, max_workers=2)
+                mock_upload.assert_called_once()
+
+    def test_write_schemes_json_preserves_existing_schemes(self) -> None:
+        with WorkspaceTemporaryDirectory() as tmp:
+            data_dir = Path(tmp) / "data"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            target = data_dir / "schemes.json.gz"
+
+            # Create existing schemes.json.gz with old scheme 100001
+            initial_data = {"100001": ["INF001", "", "Old Scheme 1"]}
+            with gzip.open(target, "wt", encoding="utf-8") as gz:
+                json.dump(initial_data, gz)
+
+            # Update with partition that only contains scheme 200002
+            p2 = data_dir / "nav_fy_2027_28.db"
+            rows, _ = parse_nav_text(sample_line(200002, "New Scheme 2", "15.00", "05-Jun-2027"))
+            update_databases(rows, date(2027, 6, 5), data_dir)
+
+            write_schemes_json([p2], target_path=target)
+
+            with gzip.open(target, "rt", encoding="utf-8") as gz:
+                merged = json.load(gz)
+
+            self.assertIn("100001", merged)
+            self.assertEqual(merged["100001"][2], "Old Scheme 1")
+            self.assertIn("200002", merged)
+            self.assertEqual(merged["200002"][2], "New Scheme 2")
 
     @unittest.skipUnless(os.environ.get("LIVE_FEED") == "1", "Requires LIVE_FEED=1")
     def test_live_amfi_canary(self) -> None:

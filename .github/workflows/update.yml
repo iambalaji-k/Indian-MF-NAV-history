@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "30 13 * * *"
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "data/**"
+      - "logs/**"
 
 concurrency:
   group: nav-update
@@ -12,22 +18,22 @@ concurrency:
 permissions:
   contents: write
   issues: write
+  pages: write
+  id-token: write
 
 jobs:
   update:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
 
       - name: Fetch and update NAV archive
         env:
@@ -72,3 +78,15 @@ jobs:
             --title "${TITLE}" \
             --body "Daily NAV update workflow failed on $(date -u '+%Y-%m-%d %H:%M:%S UTC'). Please check workflow logs for feed layout changes, validation errors, or sanity gate failures: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --label "bug" || echo "Note: Could not open GitHub issue; verify repository permissions."
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
