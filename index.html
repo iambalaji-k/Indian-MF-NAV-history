@@ -309,7 +309,7 @@
     <footer class="border-t border-ink-line py-6 mt-auto">
         <div class="max-w-5xl mx-auto px-4 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-paper-mute">
             <p>Data sourced automatically from <a href="https://www.amfiindia.com/" target="_blank" rel="noopener" class="text-paper-dim hover:text-brass transition-colors underline-offset-2 hover:underline">AMFI India</a></p>
-            <p class="font-mono tnum">Archive begins 2026-04-01 · Refreshed daily ~19:00 IST</p>
+            <p class="font-mono tnum">Archive begins 2026-04-01 · Refreshed daily ~23:00 IST</p>
         </div>
     </footer>
 
@@ -394,14 +394,17 @@
             return rows;
         }
 
-        async function resolveLatestSnapshotPath() {
+        async function resolveLatestSnapshot() {
             // O(1) path: pipeline-written pointer. Falls back to probing dates.
             try {
                 const res = await fetch('data/latest.json', { cache: 'no-store' });
                 if (res.ok) {
                     const pointer = await res.json();
                     if (pointer && typeof pointer.file === 'string' && !pointer.file.includes('..')) {
-                        return `data/${pointer.file}`;
+                        return {
+                            path: `data/${pointer.file}`,
+                            date: pointer.date || null
+                        };
                     }
                 }
             } catch (err) {
@@ -422,16 +425,20 @@
             return paths;
         }
 
-        async function applySnapshot(filePath, schemesMap) {
+        async function applySnapshot(filePath, schemesMap, knownDate = null) {
             const csvText = await fetchAndDecompressGzip(filePath);
             if (csvText === null) return false;
 
             const parsedRows = parseNavCsv(csvText);
             if (parsedRows.length === 0) return false;
 
+            let maxNavDate = '';
             navData = parsedRows.map(row => {
                 const code = String(row.scheme_code || '').trim();
                 const meta = schemesMap[code] || ['', '', `Scheme ${code}`];
+                if (row.nav_date && row.nav_date > maxNavDate) {
+                    maxNavDate = row.nav_date;
+                }
                 const record = {
                     scheme_code: code,
                     nav: row.nav,
@@ -452,7 +459,9 @@
             searchInput.disabled = false;
             searchInput.placeholder = `Search ${navData.length.toLocaleString()} schemes`;
 
-            const latestDate = navData[0].nav_date || '';
+            const fileDateMatch = filePath.match(/nav_(\d{4}-\d{2}-\d{2})\.csv\.gz/);
+            const fileDate = fileDateMatch ? fileDateMatch[1] : '';
+            const latestDate = knownDate || fileDate || maxNavDate || (navData[0] && navData[0].nav_date) || '';
             setStatus('live', `Updated ${latestDate}`);
 
             document.getElementById('archive-stats').textContent =
@@ -488,17 +497,19 @@
             }
 
             const candidates = [];
-            const pointed = await resolveLatestSnapshotPath();
+            const pointed = await resolveLatestSnapshot();
             if (pointed) candidates.push(pointed);
             for (const path of buildCandidatePaths()) {
-                if (!candidates.includes(path)) candidates.push(path);
+                if (!candidates.some(c => c.path === path)) {
+                    candidates.push({ path, date: null });
+                }
             }
 
-            for (const filePath of candidates) {
+            for (const candidate of candidates) {
                 try {
-                    if (await applySnapshot(filePath, schemesMap)) return;
+                    if (await applySnapshot(candidate.path, schemesMap, candidate.date)) return;
                 } catch (err) {
-                    console.warn(`Attempt for ${filePath} failed:`, err);
+                    console.warn(`Attempt for ${candidate.path} failed:`, err);
                 }
             }
 

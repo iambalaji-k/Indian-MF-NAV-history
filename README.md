@@ -32,7 +32,7 @@ Explore and search the latest NAV data for all Indian Mutual Funds at: **[Indian
   - XSS-safe rendering: all feed-derived strings are inserted via DOM text nodes — never `innerHTML`.
   - Content-Security-Policy meta tag plus pinned CDN assets with Subresource Integrity hashes; no third-party CSV parser.
 - **Automated Daily Pipeline with Failure Alerts**:
-  - GitHub Actions runs daily at 13:30 UTC (~7:00 PM IST) with a `concurrency` group (overlapping runs queue instead of racing), a 15-minute job timeout, and a rebase-before-push guard.
+  - GitHub Actions runs daily at 17:30 UTC (~11:00 PM IST) with a `concurrency` group (overlapping runs queue instead of racing), a 15-minute job timeout, and a rebase-before-push guard.
   - Automatically creates a GitHub issue with the `bug` label and direct run logs upon workflow or sanity gate failure — deduplicated so a persistent problem opens one issue, not one per day.
 - **Zero Third-Party Python Dependencies**: Uses only standard library modules.
 
@@ -260,7 +260,7 @@ npx tailwindcss -i input.css -o styles.min.css --minify
 
 ## GitHub Actions Automation
 
-The scheduled workflow (`.github/workflows/update.yml`) runs daily at **13:30 UTC (~7:00 PM IST)**:
+The scheduled workflow (`.github/workflows/update.yml`) runs daily at **17:30 UTC (~11:00 PM IST)**:
 
 1. Checks out repository (`fetch-depth: 1`).
 2. Configures Python 3.12 environment.
