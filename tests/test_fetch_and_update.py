@@ -22,6 +22,8 @@ from scripts.fetch_and_update import (
     check_row_count_plausibility,
     check_stale_feed,
     detect_feed_layout,
+    DailySnapshot,
+    determine_snapshot_date,
     fy_start_years_through,
     normalize_nav,
     parse_nav_feed,
@@ -300,14 +302,16 @@ class FetchAndUpdateTests(unittest.TestCase):
                 )
             )
             seen_on = date(2026, 4, 2)
-            csv_path = write_daily_run_csv(data_dir, rows, seen_on)
+            snapshot = write_daily_run_csv(data_dir, rows, seen_on)
 
             # Snapshot is named by newest NAV date, not the run date.
             expected_path = data_dir / "2026" / "04" / "nav_2026-04-01.csv.gz"
-            self.assertEqual(csv_path, expected_path)
+            self.assertIsInstance(snapshot, DailySnapshot)
+            self.assertEqual(snapshot.path, expected_path)
+            self.assertEqual(snapshot.date, date(2026, 4, 1))
             self.assertTrue(expected_path.exists())
 
-            with gzip.open(csv_path, "rt", newline="", encoding="utf-8") as handle:
+            with gzip.open(snapshot.path, "rt", newline="", encoding="utf-8") as handle:
                 csv_rows = list(csv.reader(handle))
 
             self.assertEqual(csv_rows[0], ["scheme_code", "nav", "nav_date"])
@@ -316,6 +320,61 @@ class FetchAndUpdateTests(unittest.TestCase):
             self.assertEqual(csv_rows[1][1], "10.0000")
             self.assertEqual(csv_rows[1][2], "2026-04-01")
 
+    def test_determine_snapshot_date_selects_majority_trading_date(self) -> None:
+        friday_lines = "\n".join(sample_line(100000 + i, f"Fund {i}", "10.00", "30-Oct-2026") for i in range(10))
+        sunday_line = sample_line(100020, "Overnight Fund", "10.00", "01-Nov-2026")
+        rows, _ = parse_nav_text(f"{friday_lines}\n{sunday_line}")
+
+        self.assertEqual(determine_snapshot_date(rows, date(2026, 10, 30)), date(2026, 10, 30))
+        self.assertEqual(determine_snapshot_date(rows, date(2026, 10, 31)), date(2026, 10, 30))
+        self.assertEqual(determine_snapshot_date(rows, date(2026, 11, 1)), date(2026, 10, 30))
+
+    def test_determine_snapshot_date_breaks_ties_with_latest_date(self) -> None:
+        line1 = sample_line(100001, "Fund 1", "10.00", "01-Apr-2026")
+        line2 = sample_line(100002, "Fund 2", "10.00", "02-Apr-2026")
+        rows, _ = parse_nav_text(f"{line1}\n{line2}")
+        self.assertEqual(determine_snapshot_date(rows, date(2026, 4, 5)), date(2026, 4, 2))
+
+    def test_determine_snapshot_date_empty_rows_raises(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            determine_snapshot_date([])
+        self.assertIn("No NAV rows available", str(ctx.exception))
+
+    def test_determine_snapshot_date_all_future_fallback_warns(self) -> None:
+        rows, _ = parse_nav_text(sample_line(100001, "Future Fund", "10.00", "05-Nov-2026"))
+        with self.assertLogs(level="WARNING") as cm:
+            d = determine_snapshot_date(rows, seen_on=date(2026, 10, 31))
+        self.assertEqual(d, date(2026, 11, 5))
+        self.assertTrue(any("recording as-is" in msg for msg in cm.output))
+
+    def test_check_stale_feed_warns_with_future_outliers(self) -> None:
+        old_lines = "\n".join(sample_line(100000 + i, f"Old {i}", "10.00", "21-Oct-2026") for i in range(10))
+        future_line = sample_line(100020, "Future Outlier", "10.00", "02-Nov-2026")
+        rows, _ = parse_nav_text(f"{old_lines}\n{future_line}")
+
+        with self.assertLogs(level="WARNING") as cm:
+            check_stale_feed(rows, seen_on=date(2026, 10, 31), max_stale_days=4)
+        self.assertTrue(any("STALE_FEED_WARNING" in msg for msg in cm.output))
+
+    def test_check_stale_feed_warns_on_future_primary_date(self) -> None:
+        rows, _ = parse_nav_text(sample_line(100001, "Future Primary", "10.00", "05-Nov-2026"))
+        with self.assertLogs(level="WARNING") as cm:
+            check_stale_feed(rows, seen_on=date(2026, 10, 31))
+        self.assertTrue(any("FUTURE_FEED_WARNING" in msg for msg in cm.output))
+
+    def test_write_daily_run_csv_with_advance_weekend_rows(self) -> None:
+        with WorkspaceTemporaryDirectory() as tmp:
+            data_dir = Path(tmp) / "data"
+            friday_lines = "\n".join(sample_line(100000 + i, f"Fund {i}", "10.00", "30-Oct-2026") for i in range(10))
+            sunday_line = sample_line(100020, "Overnight Fund", "10.00", "01-Nov-2026")
+            rows, _ = parse_nav_text(f"{friday_lines}\n{sunday_line}")
+
+            snapshot = write_daily_run_csv(data_dir, rows, seen_on=date(2026, 10, 31))
+            self.assertEqual(snapshot.date, date(2026, 10, 30))
+            expected_path = data_dir / "2026" / "10" / "nav_2026-10-30.csv.gz"
+            self.assertEqual(snapshot.path, expected_path)
+            self.assertTrue(expected_path.exists())
+
     def test_weekend_rerun_produces_identical_snapshot_bytes(self) -> None:
         with WorkspaceTemporaryDirectory() as tmp:
             data_dir = Path(tmp) / "data"
@@ -323,11 +382,12 @@ class FetchAndUpdateTests(unittest.TestCase):
             saturday_rows, _ = parse_nav_text(sample_line(100001, "Fund", "10.00", "03-Apr-2026"))
 
             first = write_daily_run_csv(data_dir, friday_rows, date(2026, 4, 3))
-            first_bytes = first.read_bytes()
+            first_bytes = first.path.read_bytes()
             second = write_daily_run_csv(data_dir, saturday_rows, date(2026, 4, 4))
 
-            self.assertEqual(first, second)
-            self.assertEqual(second.read_bytes(), first_bytes)
+            self.assertEqual(first.path, second.path)
+            self.assertEqual(first.date, second.date)
+            self.assertEqual(second.path.read_bytes(), first_bytes)
             siblings = list((data_dir / "2026" / "04").glob("nav_*.csv.gz"))
             self.assertEqual(len(siblings), 1, "weekend rerun must not create a second snapshot")
 

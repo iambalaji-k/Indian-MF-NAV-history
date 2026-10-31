@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import argparse
 import csv
 import gzip
@@ -364,15 +366,27 @@ def log_feed_summary(rows: list[NavRow], invalid_count: int, layouts: dict[int, 
     )
 
 
-def check_stale_feed(rows: list[NavRow], seen_on: date, max_stale_days: int = 4) -> None:
+def check_stale_feed(
+    rows: list[NavRow],
+    seen_on: date,
+    max_stale_days: int = 4,
+    snapshot_date: date | None = None,
+) -> None:
     if not rows:
         return
-    newest_date = max(row.nav_date for row in rows)
-    age_days = (seen_on - newest_date).days
-    if age_days > max_stale_days:
+    ref_date = snapshot_date or determine_snapshot_date(rows, seen_on)
+    age_days = (seen_on - ref_date).days
+    if age_days < 0:
         logging.warning(
-            "STALE_FEED_WARNING: Newest NAV date in feed is %s (%d days behind run date %s).",
-            newest_date.isoformat(),
+            "FUTURE_FEED_WARNING: Primary NAV date in feed is in the future: %s (%d days ahead of run date %s).",
+            ref_date.isoformat(),
+            abs(age_days),
+            seen_on.isoformat(),
+        )
+    elif age_days > max_stale_days:
+        logging.warning(
+            "STALE_FEED_WARNING: Primary NAV date in feed is %s (%d days behind run date %s).",
+            ref_date.isoformat(),
             age_days,
             seen_on.isoformat(),
         )
@@ -672,15 +686,50 @@ def write_bytes_if_changed(path: Path, payload: bytes) -> bool:
     return True
 
 
-def write_daily_run_csv(data_dir: Path, rows: list[NavRow], seen_on: date) -> Path:
+class DailySnapshot(NamedTuple):
+    path: Path
+    date: date
+
+
+def determine_snapshot_date(rows: list[NavRow], seen_on: date | None = None) -> date:
+    """Determine the primary snapshot date for a feed snapshot.
+
+    In the AMFI feed, a tiny minority of liquid/overnight funds declare advance
+    weekend/holiday accruals (e.g. posting Sunday NAVs on Friday night). To ensure
+    the daily snapshot reflects the actual market trading session:
+    1. Filter out dates strictly beyond seen_on (if provided).
+       If all rows happen to be after seen_on, log a warning and fallback to recording as-is.
+    2. Pick the statistical mode (most frequent NAV date across schemes).
+       If frequencies are tied, break ties with the latest date.
+    """
+    if not rows:
+        raise ValueError("No NAV rows available to determine snapshot date")
+
+    eligible_rows = [r for r in rows if seen_on is None or r.nav_date <= seen_on]
+    if not eligible_rows:
+        logging.warning(
+            "All %d NAV rows have dates after seen_on %s; recording as-is",
+            len(rows),
+            seen_on.isoformat() if seen_on else "None",
+        )
+        eligible_rows = rows
+
+    date_counts: dict[date, int] = {}
+    for r in eligible_rows:
+        date_counts[r.nav_date] = date_counts.get(r.nav_date, 0) + 1
+
+    return max(date_counts.keys(), key=lambda d: (date_counts[d], d))
+
+
+def write_daily_run_csv(data_dir: Path, rows: list[NavRow], seen_on: date) -> DailySnapshot:
     if not rows:
         raise ValueError("No NAV rows available to snapshot")
 
-    # Name the snapshot by the newest NAV date in the feed. Weekend/holiday
+    # Name the snapshot by the primary trading session date in the feed. Weekend/holiday
     # runs then reuse the last trading day's filename; combined with
     # deterministic GZIP output this makes repeat runs byte-identical no-ops
-    # for Git instead of duplicating snapshots.
-    snapshot_date = max(row.nav_date for row in rows)
+    # for Git instead of duplicating snapshots or jumping ahead due to overnight funds.
+    snapshot_date = determine_snapshot_date(rows, seen_on)
     year = snapshot_date.year
     month = f"{snapshot_date.month:02d}"
     folder = data_dir / str(year) / month
@@ -703,7 +752,7 @@ def write_daily_run_csv(data_dir: Path, rows: list[NavRow], seen_on: date) -> Pa
     logging.info(
         "%s daily run CSV: %s", "Wrote" if changed else "Skipped (unchanged)", csv_path
     )
-    return csv_path
+    return DailySnapshot(csv_path, snapshot_date)
 
 
 def write_latest_json(
@@ -882,12 +931,11 @@ def publish_artifacts(
     data_dir: Path,
     db_paths: list[Path] | None = None,
 ) -> None:
-    csv_path = write_daily_run_csv(data_dir, rows, seen_on)
-    snapshot_date = max(row.nav_date for row in rows)
+    snapshot = write_daily_run_csv(data_dir, rows, seen_on)
     write_latest_json(
         data_dir,
-        csv_path,
-        snapshot_date=snapshot_date,
+        snapshot.path,
+        snapshot_date=snapshot.date,
         scheme_count=len({row.scheme_code for row in rows}),
     )
     paths_to_merge = db_paths if db_paths is not None else all_fy_db_paths(seen_on, data_dir)
@@ -910,7 +958,8 @@ def main(argv: list[str] | None = None) -> int:
                 "AMFI feed yielded zero valid NAV rows; aborting to avoid publishing an empty dataset"
             )
 
-        check_stale_feed(rows, seen_on)
+        snapshot_date = determine_snapshot_date(rows, seen_on) if rows else None
+        check_stale_feed(rows, seen_on, snapshot_date=snapshot_date)
         # Detect drift up front (strict mode aborts here), but only persist
         # the new profile after the pipeline succeeds so a failed run cannot
         # silently erase an unacknowledged drift alarm.
